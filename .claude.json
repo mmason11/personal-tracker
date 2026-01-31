@@ -1,0 +1,109 @@
+{
+  "numStartups": 1,
+  "tipsHistory": {
+    "new-user-warmup": 1,
+    "plan-mode-for-complex-tasks": 1,
+    "terminal-setup": 1,
+    "memory-command": 1,
+    "theme-command": 1,
+    "status-line": 1
+  },
+  "promptQueueUseCount": 2,
+  "cachedGrowthBookFeatures": {
+    "tengu_brass_pebble": false,
+    "tengu_mcp_tool_search": true,
+    "tengu_keybinding_customization": false,
+    "tengu_1p_event_batch_config": {
+      "scheduledDelayMillis": 5000,
+      "maxExportBatchSize": 200,
+      "maxQueueSize": 8192
+    },
+    "tengu_scratch": true,
+    "tengu_disable_bypass_permissions_mode": false,
+    "tengu_event_sampling_config": {},
+    "tengu_tool_pear": false,
+    "tengu_log_segment_events": false,
+    "tengu_log_datadog_events": true,
+    "tengu_c4w_usage_limit_notifications_enabled": true,
+    "tengu_thinkback": false,
+    "tengu-top-of-feed-tip": {
+      "tip": "",
+      "color": ""
+    },
+    "tengu_react_vulnerability_warning": false,
+    "tengu_code_diff_cli": true,
+    "tengu_post_compact_survey": false,
+    "tengu_claudeai_mcp_connectors": true,
+    "tengu_pid_based_version_locking": true,
+    "enhanced_telemetry_beta": false,
+    "tengu_tool_search_unsupported_models": [
+      "haiku"
+    ],
+    "tengu_attribution_header": true,
+    "tengu_cache_plum_violet": false,
+    "tengu_streaming_tool_execution2": false,
+    "tengu_session_memory": false,
+    "tengu_plank_river_frost": "user_intent"
+  },
+  "userID": "78448f373e4f5dab6f7cebee3c28dd65d3c2148702796ea891b6f3ec1f3e6e47",
+  "firstStartTime": "2026-01-26T22:09:57.795Z",
+  "sonnet45MigrationComplete": true,
+  "opus45MigrationComplete": true,
+  "opusProMigrationComplete": true,
+  "opusProMigrationTimestamp": 1769465397831,
+  "thinkingMigrationComplete": true,
+  "cachedChromeExtensionInstalled": false,
+  "changelogLastFetched": 1769465428294,
+  "claudeCodeFirstTokenDate": "2026-01-26T19:36:21.341433Z",
+  "hasCompletedOnboarding": true,
+  "lastOnboardingVersion": "2.1.19",
+  "projects": {
+    "C:/Users/markm/coaching-website": {
+      "allowedTools": [],
+      "mcpContextUris": [],
+      "mcpServers": {},
+      "enabledMcpjsonServers": [],
+      "disabledMcpjsonServers": [],
+      "hasTrustDialogAccepted": true,
+      "projectOnboardingSeenCount": 1,
+      "hasClaudeMdExternalIncludesApproved": false,
+      "hasClaudeMdExternalIncludesWarningShown": false,
+      "reactVulnerabilityCache": {
+        "detected": false,
+        "package": null,
+        "packageName": null,
+        "version": null,
+        "packageManager": null
+      }
+    }
+  },
+  "lastReleaseNotesSeen": "2.1.19",
+  "hasShownOpus45Notice": {
+    "8b919ff0-050f-4eee-bfa8-3eebf8885679": true
+  },
+  "s1mAccessCache": {
+    "8b919ff0-050f-4eee-bfa8-3eebf8885679": {
+      "hasAccess": false,
+      "hasAccessNotAsDefault": false,
+      "timestamp": 1769465428328
+    }
+  },
+  "groveConfigCache": {
+    "4ac26276-52be-42f8-bae9-8425e4a02b13": {
+      "grove_enabled": true,
+      "timestamp": 1769465428374
+    }
+  },
+  "officialMarketplaceAutoInstallAttempted": true,
+  "officialMarketplaceAutoInstalled": true,
+  "oauthAccount": {
+    "accountUuid": "4ac26276-52be-42f8-bae9-8425e4a02b13",
+    "emailAddress": "markmason910@gmail.com",
+    "organizationUuid": "8b919ff0-050f-4eee-bfa8-3eebf8885679",
+    "hasExtraUsageEnabled": false,
+    "displayName": "Mark",
+    "organizationRole": "admin",
+    "workspaceRole": null,
+    "organizationName": "markmason910@gmail.com's Organization"
+  }
+}
