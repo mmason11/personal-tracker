@@ -7,12 +7,14 @@ import { fetchSportsSchedules, getGamesForDate } from "@/lib/sports";
 import { isCompleted } from "@/lib/streaks";
 import { formatTime12h } from "@/lib/timeFormat";
 
+import { CalendarEvent } from "@/lib/types";
+
 interface TimeBlock {
   id: string;
   name: string;
   start: string;
   end: string;
-  type: "routine" | "game-mancity" | "game-illinois";
+  type: "routine" | "game-mancity" | "game-illinois" | "google";
   completed?: boolean;
 }
 
@@ -66,6 +68,36 @@ export default function DayTimeline() {
         type: game.team === "man-city" ? "game-mancity" : "game-illinois",
       });
     });
+
+    // Fetch Google Calendar events for this day
+    const token = localStorage.getItem("google_access_token");
+    if (token) {
+      try {
+        const res = await fetch(`/api/calendar?action=events&token=${token}`);
+        if (res.ok) {
+          const gcalEvents: CalendarEvent[] = await res.json();
+          gcalEvents.forEach((evt) => {
+            if (!evt.start || !evt.end) return;
+            const evtDate = evt.start.substring(0, 10);
+            if (evtDate !== dateStr) return;
+            // Skip events we synced ourselves
+            if (evt.summary.startsWith("[Routine]") || evt.summary.startsWith("[Game]")) return;
+            const startTime = evt.start.substring(11, 16);
+            const endTime = evt.end.substring(11, 16);
+            if (!startTime || !endTime) return;
+            timeBlocks.push({
+              id: evt.id,
+              name: evt.summary,
+              start: startTime,
+              end: endTime,
+              type: "google",
+            });
+          });
+        }
+      } catch {
+        // Ignore calendar fetch errors
+      }
+    }
 
     timeBlocks.sort((a, b) => timeToMinutes(a.start) - timeToMinutes(b.start));
     setBlocks(timeBlocks);
@@ -207,6 +239,10 @@ export default function DayTimeline() {
               bgClass = "from-orange-500/25 to-amber-600/10 border-orange-400/50";
               dotClass = "bg-orange-400";
               textClass = "text-orange-300";
+            } else if (block.type === "google") {
+              bgClass = "from-violet-500/20 to-purple-600/10 border-violet-400/50";
+              dotClass = "bg-violet-400";
+              textClass = "text-violet-300";
             }
 
             return (
