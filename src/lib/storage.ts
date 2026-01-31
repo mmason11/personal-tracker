@@ -1,4 +1,4 @@
-import { BigThreeGoal, TodoItem } from "./types";
+import { BigThreeGoal, TodoItem, CustomEvent, RoutineOverride } from "./types";
 import { v4 as uuidv4 } from "uuid";
 import { startOfWeek, format } from "date-fns";
 
@@ -89,4 +89,73 @@ export function removeTodo(id: string): TodoItem[] {
   const todos = getTodos().filter((t) => t.id !== id);
   saveTodos(todos);
   return todos;
+}
+
+// Custom Events
+const CUSTOM_EVENTS_KEY = "custom_events";
+
+export function getCustomEvents(): CustomEvent[] {
+  if (typeof window === "undefined") return [];
+  const stored = localStorage.getItem(CUSTOM_EVENTS_KEY);
+  return stored ? JSON.parse(stored) : [];
+}
+
+export function saveCustomEvents(events: CustomEvent[]): void {
+  localStorage.setItem(CUSTOM_EVENTS_KEY, JSON.stringify(events));
+}
+
+export function getCustomEventsForDate(date: string): CustomEvent[] {
+  return getCustomEvents().filter((e) => e.date === date);
+}
+
+export function addCustomEvent(event: Omit<CustomEvent, "id">): CustomEvent[] {
+  const events = getCustomEvents();
+  events.push({ ...event, id: uuidv4() });
+  saveCustomEvents(events);
+  return events;
+}
+
+export function updateCustomEvent(id: string, updates: Partial<CustomEvent>): CustomEvent[] {
+  const events = getCustomEvents();
+  const idx = events.findIndex((e) => e.id === id);
+  if (idx !== -1) events[idx] = { ...events[idx], ...updates };
+  saveCustomEvents(events);
+  return events;
+}
+
+export function removeCustomEvent(id: string): CustomEvent[] {
+  const events = getCustomEvents().filter((e) => e.id !== id);
+  saveCustomEvents(events);
+  return events;
+}
+
+// Routine Overrides
+const ROUTINE_OVERRIDES_KEY = "routine_overrides";
+
+export function getRoutineOverrides(): RoutineOverride[] {
+  if (typeof window === "undefined") return [];
+  const stored = localStorage.getItem(ROUTINE_OVERRIDES_KEY);
+  return stored ? JSON.parse(stored) : [];
+}
+
+export function getOverrideForRoutine(routineId: string, date: string): RoutineOverride | undefined {
+  return getRoutineOverrides().find((o) => o.routineId === routineId && o.date === date);
+}
+
+export function setRoutineOverride(routineId: string, date: string, start: string, end: string): void {
+  const overrides = getRoutineOverrides();
+  const idx = overrides.findIndex((o) => o.routineId === routineId && o.date === date);
+  if (idx !== -1) {
+    overrides[idx] = { routineId, date, start, end };
+  } else {
+    overrides.push({ routineId, date, start, end });
+  }
+  localStorage.setItem(ROUTINE_OVERRIDES_KEY, JSON.stringify(overrides));
+}
+
+export function removeRoutineOverride(routineId: string, date: string): void {
+  const overrides = getRoutineOverrides().filter(
+    (o) => !(o.routineId === routineId && o.date === date)
+  );
+  localStorage.setItem(ROUTINE_OVERRIDES_KEY, JSON.stringify(overrides));
 }

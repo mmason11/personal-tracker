@@ -65,3 +65,18 @@ export interface CalendarEvent {
   end: string;
   source: "routine" | "sports" | "manual" | "google";
 }
+
+export interface CustomEvent {
+  id: string;
+  name: string;
+  date: string; // YYYY-MM-DD
+  start: string; // HH:mm
+  end: string; // HH:mm
+}
+
+export interface RoutineOverride {
+  routineId: string;
+  date: string; // YYYY-MM-DD
+  start: string; // HH:mm
+  end: string; // HH:mm
+}

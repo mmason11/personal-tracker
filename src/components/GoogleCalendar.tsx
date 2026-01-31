@@ -1,11 +1,23 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
-import { format, addDays, startOfWeek, isToday, isSameDay } from "date-fns";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { format, addDays, startOfDay, isToday, isSameDay } from "date-fns";
 import { CalendarEvent } from "@/lib/types";
 import { getRoutineForDate, getCurrentWeek } from "@/lib/routine";
 import { fetchSportsSchedules, getUpcomingGames } from "@/lib/sports";
 import { formatTime12h } from "@/lib/timeFormat";
+import {
+  getCustomEventsForDate,
+  addCustomEvent,
+  updateCustomEvent,
+  removeCustomEvent,
+} from "@/lib/storage";
+import EventEditor from "./EventEditor";
+
+interface CalendarDisplayEvent extends CalendarEvent {
+  editable: boolean;
+  customEventId?: string;
+}
 
 export default function GoogleCalendar() {
   const [connected, setConnected] = useState(false);
@@ -13,16 +25,33 @@ export default function GoogleCalendar() {
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState<string | null>(null);
-  const [weekStart, setWeekStart] = useState(() =>
-    startOfWeek(new Date(), { weekStartsOn: 0 })
-  );
+  const [weekStart, setWeekStart] = useState(() => startOfDay(new Date()));
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  // Editor state
+  const [editorState, setEditorState] = useState<{
+    mode: "create" | "edit";
+    eventId?: string;
+    eventType?: "custom";
+    initialData: { name: string; start: string; end: string; date: string };
+  } | null>(null);
+
+  // Cross-day drag state (desktop only)
+  const [dragCalState, setDragCalState] = useState<{
+    eventId: string;
+    sourceDate: string;
+    currentColIdx: number | null;
+    hasMoved: boolean;
+  } | null>(null);
+  const dayColumnRefs = useRef<(HTMLDivElement | null)[]>([]);
 
   const weekDays = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
 
   const goToPrevWeek = () => setWeekStart((d) => addDays(d, -7));
   const goToNextWeek = () => setWeekStart((d) => addDays(d, 7));
-  const goToThisWeek = () =>
-    setWeekStart(startOfWeek(new Date(), { weekStartsOn: 0 }));
+  const goToThisWeek = () => setWeekStart(startOfDay(new Date()));
+
+  const triggerRefresh = () => setRefreshKey((k) => k + 1);
 
   const getValidToken = useCallback(async (): Promise<string | null> => {
     const token = localStorage.getItem("google_access_token");
@@ -207,21 +236,45 @@ export default function GoogleCalendar() {
     setSyncing(false);
   };
 
-  const getEventsForDay = (date: Date): CalendarEvent[] => {
+  const getEventsForDay = (date: Date): CalendarDisplayEvent[] => {
     const dateStr = format(date, "yyyy-MM-dd");
-    return events
+
+    // Google calendar events
+    const googleEvents: CalendarDisplayEvent[] = events
       .filter((e) => e.start.startsWith(dateStr))
-      .sort((a, b) => a.start.localeCompare(b.start));
+      .map((e) => ({ ...e, editable: false }));
+
+    // Custom events from localStorage
+    const customEvents: CalendarDisplayEvent[] = getCustomEventsForDate(dateStr).map((ce) => ({
+      id: `custom-${ce.id}`,
+      customEventId: ce.id,
+      summary: ce.name,
+      start: `${ce.date}T${ce.start}:00`,
+      end: `${ce.date}T${ce.end}:00`,
+      source: "manual" as const,
+      editable: true,
+    }));
+
+    return [...googleEvents, ...customEvents].sort((a, b) =>
+      a.start.localeCompare(b.start)
+    );
   };
 
-  const getEventStyle = (summary: string) => {
-    if (summary.startsWith("[Routine]"))
+  const getEventStyle = (evt: CalendarDisplayEvent) => {
+    if (evt.source === "manual" || evt.editable) {
+      return {
+        bg: "bg-rose-500/15 border-rose-500/30",
+        text: "text-rose-300",
+        time: "text-rose-400/60",
+      };
+    }
+    if (evt.summary.startsWith("[Routine]"))
       return {
         bg: "bg-emerald-500/15 border-emerald-500/30",
         text: "text-emerald-300",
         time: "text-emerald-400/60",
       };
-    if (summary.startsWith("[Game]"))
+    if (evt.summary.startsWith("[Game]"))
       return {
         bg: "bg-sky-500/15 border-sky-500/30",
         text: "text-sky-300",
@@ -245,6 +298,91 @@ export default function GoogleCalendar() {
   };
 
   const cleanSummary = (s: string) => s.replace(/^\[(Routine|Game)\] /, "");
+
+  // Cross-day drag handlers (desktop)
+  const handleDragPointerDown = (e: React.PointerEvent, evt: CalendarDisplayEvent, dayIdx: number) => {
+    if (!evt.editable || !evt.customEventId) return;
+    e.preventDefault();
+    e.stopPropagation();
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    const sourceDate = format(weekDays[dayIdx], "yyyy-MM-dd");
+    setDragCalState({
+      eventId: evt.customEventId,
+      sourceDate,
+      currentColIdx: dayIdx,
+      hasMoved: false,
+    });
+  };
+
+  const handleDragPointerMove = useCallback(
+    (e: PointerEvent) => {
+      if (!dragCalState) return;
+      // Determine which column the pointer is over
+      for (let i = 0; i < dayColumnRefs.current.length; i++) {
+        const col = dayColumnRefs.current[i];
+        if (!col) continue;
+        const rect = col.getBoundingClientRect();
+        if (e.clientX >= rect.left && e.clientX <= rect.right) {
+          if (i !== dragCalState.currentColIdx) {
+            setDragCalState((prev) =>
+              prev ? { ...prev, currentColIdx: i, hasMoved: true } : null
+            );
+          }
+          break;
+        }
+      }
+    },
+    [dragCalState]
+  );
+
+  const handleDragPointerUp = useCallback(() => {
+    if (!dragCalState) return;
+    if (dragCalState.hasMoved && dragCalState.currentColIdx !== null) {
+      const newDate = format(weekDays[dragCalState.currentColIdx], "yyyy-MM-dd");
+      if (newDate !== dragCalState.sourceDate) {
+        updateCustomEvent(dragCalState.eventId, { date: newDate });
+        triggerRefresh();
+      }
+    }
+    setDragCalState(null);
+  }, [dragCalState, weekDays]);
+
+  useEffect(() => {
+    if (!dragCalState) return;
+    window.addEventListener("pointermove", handleDragPointerMove);
+    window.addEventListener("pointerup", handleDragPointerUp);
+    return () => {
+      window.removeEventListener("pointermove", handleDragPointerMove);
+      window.removeEventListener("pointerup", handleDragPointerUp);
+    };
+  }, [dragCalState, handleDragPointerMove, handleDragPointerUp]);
+
+  // Click handlers
+  const handleEventClick = (evt: CalendarDisplayEvent) => {
+    if (dragCalState?.hasMoved) return;
+    if (!evt.editable || !evt.customEventId) return;
+    const startTime = evt.start.substring(11, 16);
+    const endTime = evt.end.substring(11, 16);
+    const date = evt.start.substring(0, 10);
+    setEditorState({
+      mode: "edit",
+      eventId: evt.customEventId,
+      eventType: "custom",
+      initialData: { name: evt.summary, start: startTime, end: endTime, date },
+    });
+  };
+
+  const handleDayClick = (day: Date) => {
+    const dateStr = format(day, "yyyy-MM-dd");
+    setEditorState({
+      mode: "create",
+      initialData: { name: "", start: "09:00", end: "09:30", date: dateStr },
+    });
+  };
+
+  // Force re-read of custom events
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const _refresh = refreshKey;
 
   return (
     <div className="space-y-4">
@@ -416,18 +554,29 @@ export default function GoogleCalendar() {
           </div>
 
           {/* Desktop: 7-column grid */}
-          <div className="hidden md:grid grid-cols-7 gap-2">
-            {weekDays.map((day) => {
+          <div className="hidden md:grid grid-cols-7 gap-2 select-none">
+            {weekDays.map((day, dayIdx) => {
               const dayEvents = getEventsForDay(day);
               const today = isToday(day);
+              const isDropTarget = dragCalState?.currentColIdx === dayIdx && dragCalState?.hasMoved;
               return (
                 <div
                   key={day.toISOString()}
+                  ref={(el) => { dayColumnRefs.current[dayIdx] = el; }}
                   className={`bg-gradient-to-br from-slate-800 to-slate-800/80 rounded-2xl p-3 shadow-lg border min-h-[200px] transition-all ${
-                    today
+                    isDropTarget
+                      ? "border-violet-500/60 ring-2 ring-violet-500/30 bg-violet-500/5"
+                      : today
                       ? "border-violet-500/50 ring-1 ring-violet-500/20"
                       : "border-slate-700/50"
                   }`}
+                  onClick={(e) => {
+                    if (dragCalState?.hasMoved) return;
+                    // Only if clicking the column itself (not an event card)
+                    if (e.target === e.currentTarget || (e.target as HTMLElement).dataset.dayEmpty) {
+                      handleDayClick(day);
+                    }
+                  }}
                 >
                   <div className="text-center mb-3">
                     <p className="text-xs text-slate-500 uppercase font-medium">
@@ -443,16 +592,28 @@ export default function GoogleCalendar() {
                   </div>
                   <div className="space-y-1.5">
                     {dayEvents.length === 0 && (
-                      <p className="text-xs text-slate-600 text-center pt-2">
-                        --
+                      <p
+                        data-day-empty="true"
+                        className="text-xs text-slate-600 text-center pt-2 cursor-pointer hover:text-slate-400 transition-colors"
+                      >
+                        + Add event
                       </p>
                     )}
                     {dayEvents.map((evt) => {
-                      const style = getEventStyle(evt.summary);
+                      const style = getEventStyle(evt);
                       return (
                         <div
                           key={evt.id}
-                          className={`p-1.5 rounded-lg border text-xs ${style.bg}`}
+                          className={`p-1.5 rounded-lg border text-xs ${style.bg} ${
+                            evt.editable
+                              ? "cursor-grab hover:brightness-110 active:cursor-grabbing"
+                              : ""
+                          }`}
+                          onPointerDown={(e) => handleDragPointerDown(e, evt, dayIdx)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleEventClick(evt);
+                          }}
                         >
                           <p className={`font-medium truncate ${style.text}`}>
                             {cleanSummary(evt.summary)}
@@ -464,6 +625,18 @@ export default function GoogleCalendar() {
                       );
                     })}
                   </div>
+                  {/* Add button at bottom of day */}
+                  {dayEvents.length > 0 && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDayClick(day);
+                      }}
+                      className="mt-2 w-full text-xs text-slate-600 hover:text-violet-400 transition-colors text-center py-1"
+                    >
+                      +
+                    </button>
+                  )}
                 </div>
               );
             })}
@@ -509,17 +682,23 @@ export default function GoogleCalendar() {
                     )}
                   </div>
                   {dayEvents.length === 0 ? (
-                    <p className="text-xs text-slate-500 pl-13">
-                      No events
-                    </p>
+                    <button
+                      onClick={() => handleDayClick(day)}
+                      className="text-xs text-slate-500 hover:text-violet-400 transition-colors pl-13"
+                    >
+                      + Add event
+                    </button>
                   ) : (
                     <div className="space-y-1.5">
                       {dayEvents.map((evt) => {
-                        const style = getEventStyle(evt.summary);
+                        const style = getEventStyle(evt);
                         return (
                           <div
                             key={evt.id}
-                            className={`p-2.5 rounded-xl border ${style.bg} flex items-center gap-3`}
+                            className={`p-2.5 rounded-xl border ${style.bg} flex items-center gap-3 ${
+                              evt.editable ? "cursor-pointer hover:brightness-110" : ""
+                            }`}
+                            onClick={() => handleEventClick(evt)}
                           >
                             <span className={`text-xs font-mono flex-shrink-0 ${style.time}`}>
                               {formatEventTime(evt.start)}
@@ -532,6 +711,12 @@ export default function GoogleCalendar() {
                           </div>
                         );
                       })}
+                      <button
+                        onClick={() => handleDayClick(day)}
+                        className="w-full text-xs text-slate-600 hover:text-violet-400 transition-colors text-center py-1"
+                      >
+                        + Add event
+                      </button>
                     </div>
                   )}
                 </div>
@@ -539,6 +724,44 @@ export default function GoogleCalendar() {
             })}
           </div>
         </>
+      )}
+
+      {/* Event Editor Modal */}
+      {editorState && (
+        <EventEditor
+          mode={editorState.mode}
+          eventType={editorState.eventType}
+          initialData={editorState.initialData}
+          onSave={(data) => {
+            if (editorState.mode === "create") {
+              addCustomEvent({
+                name: data.name,
+                date: data.date,
+                start: data.start,
+                end: data.end,
+              });
+            } else if (editorState.eventId) {
+              updateCustomEvent(editorState.eventId, {
+                name: data.name,
+                start: data.start,
+                end: data.end,
+                date: data.date,
+              });
+            }
+            setEditorState(null);
+            triggerRefresh();
+          }}
+          onDelete={
+            editorState.eventId
+              ? () => {
+                  removeCustomEvent(editorState.eventId!);
+                  setEditorState(null);
+                  triggerRefresh();
+                }
+              : undefined
+          }
+          onClose={() => setEditorState(null)}
+        />
       )}
     </div>
   );

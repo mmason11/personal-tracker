@@ -1,11 +1,21 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { format, addDays, subDays, isToday } from "date-fns";
 import { getRoutineForDate, getCurrentWeek } from "@/lib/routine";
 import { fetchSportsSchedules, getGamesForDate } from "@/lib/sports";
 import { isCompleted } from "@/lib/streaks";
 import { formatTime12h } from "@/lib/timeFormat";
+import {
+  getCustomEventsForDate,
+  addCustomEvent,
+  updateCustomEvent,
+  removeCustomEvent,
+  getOverrideForRoutine,
+  setRoutineOverride,
+  removeRoutineOverride,
+} from "@/lib/storage";
+import EventEditor from "./EventEditor";
 
 import { CalendarEvent } from "@/lib/types";
 
@@ -14,8 +24,9 @@ interface TimeBlock {
   name: string;
   start: string;
   end: string;
-  type: "routine" | "game-mancity" | "game-illinois" | "google";
+  type: "routine" | "game-mancity" | "game-illinois" | "google" | "custom";
   completed?: boolean;
+  editable: boolean;
 }
 
 function timeToMinutes(time: string): number {
@@ -23,13 +34,21 @@ function timeToMinutes(time: string): number {
   return h * 60 + m;
 }
 
+function minutesToTime(min: number): string {
+  const clamped = Math.max(0, Math.min(min, 24 * 60 - 1));
+  const h = Math.floor(clamped / 60);
+  const m = clamped % 60;
+  return `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`;
+}
+
 function getCurrentTimeMinutes(): number {
   const now = new Date();
   return now.getHours() * 60 + now.getMinutes();
 }
 
-// Pixels per minute — controls how tall each time slot is
 const PX_PER_MIN = 1.8;
+const DRAG_THRESHOLD = 5;
+const SNAP_MINUTES = 5;
 
 export default function DayTimeline() {
   const [blocks, setBlocks] = useState<TimeBlock[]>([]);
@@ -37,6 +56,27 @@ export default function DayTimeline() {
   const [currentMinutes, setCurrentMinutes] = useState(getCurrentTimeMinutes());
   const dateStr = format(selectedDate, "yyyy-MM-dd");
   const isViewingToday = isToday(selectedDate);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Drag state
+  const [dragState, setDragState] = useState<{
+    blockId: string;
+    mode: "move" | "resize";
+    initialY: number;
+    initialStartMin: number;
+    initialEndMin: number;
+    currentStartMin: number;
+    currentEndMin: number;
+    hasMoved: boolean;
+  } | null>(null);
+
+  // Editor state
+  const [editorState, setEditorState] = useState<{
+    mode: "create" | "edit";
+    blockId?: string;
+    blockType?: "custom" | "routine";
+    initialData: { name: string; start: string; end: string; date: string };
+  } | null>(null);
 
   const loadData = useCallback(async () => {
     const week = getCurrentWeek();
@@ -48,13 +88,15 @@ export default function DayTimeline() {
 
     routine.forEach((item) => {
       if (item.endTime) {
+        const override = getOverrideForRoutine(item.id, dateStr);
         timeBlocks.push({
           id: item.id,
           name: item.name,
-          start: item.time,
-          end: item.endTime,
+          start: override ? override.start : item.time,
+          end: override ? override.end : item.endTime,
           type: "routine",
           completed: isCompleted(item.id, dateStr),
+          editable: true,
         });
       }
     });
@@ -66,10 +108,24 @@ export default function DayTimeline() {
         start: game.time,
         end: game.endTime,
         type: game.team === "man-city" ? "game-mancity" : "game-illinois",
+        editable: false,
       });
     });
 
-    // Fetch Google Calendar events for this day
+    // Custom events
+    const customEvents = getCustomEventsForDate(dateStr);
+    customEvents.forEach((evt) => {
+      timeBlocks.push({
+        id: evt.id,
+        name: evt.name,
+        start: evt.start,
+        end: evt.end,
+        type: "custom",
+        editable: true,
+      });
+    });
+
+    // Google Calendar events
     const token = localStorage.getItem("google_access_token");
     if (token) {
       try {
@@ -80,7 +136,6 @@ export default function DayTimeline() {
             if (!evt.start || !evt.end) return;
             const evtDate = evt.start.substring(0, 10);
             if (evtDate !== dateStr) return;
-            // Skip events we synced ourselves
             if (evt.summary.startsWith("[Routine]") || evt.summary.startsWith("[Game]")) return;
             const startTime = evt.start.substring(11, 16);
             const endTime = evt.end.substring(11, 16);
@@ -91,6 +146,7 @@ export default function DayTimeline() {
               start: startTime,
               end: endTime,
               type: "google",
+              editable: false,
             });
           });
         }
@@ -114,15 +170,134 @@ export default function DayTimeline() {
     return () => clearInterval(interval);
   }, []);
 
+  // Pointer event handlers for drag
+  const handlePointerDown = (
+    e: React.PointerEvent,
+    blockId: string,
+    mode: "move" | "resize"
+  ) => {
+    const block = blocks.find((b) => b.id === blockId);
+    if (!block || !block.editable) return;
+    e.preventDefault();
+    e.stopPropagation();
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+
+    setDragState({
+      blockId,
+      mode,
+      initialY: e.clientY,
+      initialStartMin: timeToMinutes(block.start),
+      initialEndMin: timeToMinutes(block.end),
+      currentStartMin: timeToMinutes(block.start),
+      currentEndMin: timeToMinutes(block.end),
+      hasMoved: false,
+    });
+  };
+
+  const handlePointerMove = useCallback(
+    (e: PointerEvent) => {
+      if (!dragState) return;
+      const deltaY = e.clientY - dragState.initialY;
+
+      if (!dragState.hasMoved && Math.abs(deltaY) < DRAG_THRESHOLD) return;
+
+      const deltaMin = deltaY / PX_PER_MIN;
+      const snappedDelta = Math.round(deltaMin / SNAP_MINUTES) * SNAP_MINUTES;
+
+      if (dragState.mode === "move") {
+        const duration = dragState.initialEndMin - dragState.initialStartMin;
+        let newStart = dragState.initialStartMin + snappedDelta;
+        newStart = Math.max(0, Math.min(newStart, 24 * 60 - duration));
+        setDragState((prev) =>
+          prev
+            ? {
+                ...prev,
+                currentStartMin: newStart,
+                currentEndMin: newStart + duration,
+                hasMoved: true,
+              }
+            : null
+        );
+      } else {
+        let newEnd = dragState.initialEndMin + snappedDelta;
+        newEnd = Math.max(dragState.currentStartMin + SNAP_MINUTES, Math.min(newEnd, 24 * 60));
+        setDragState((prev) =>
+          prev ? { ...prev, currentEndMin: newEnd, hasMoved: true } : null
+        );
+      }
+    },
+    [dragState]
+  );
+
+  const handlePointerUp = useCallback(() => {
+    if (!dragState) return;
+
+    if (dragState.hasMoved) {
+      const newStart = minutesToTime(dragState.currentStartMin);
+      const newEnd = minutesToTime(dragState.currentEndMin);
+      const block = blocks.find((b) => b.id === dragState.blockId);
+      if (block) {
+        if (block.type === "custom") {
+          updateCustomEvent(dragState.blockId, { start: newStart, end: newEnd });
+        } else if (block.type === "routine") {
+          setRoutineOverride(dragState.blockId, dateStr, newStart, newEnd);
+        }
+        loadData();
+      }
+    }
+
+    setDragState(null);
+  }, [dragState, blocks, dateStr, loadData]);
+
+  useEffect(() => {
+    if (!dragState) return;
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+    };
+  }, [dragState, handlePointerMove, handlePointerUp]);
+
   const goToPrev = () => setSelectedDate((d) => subDays(d, 1));
   const goToNext = () => setSelectedDate((d) => addDays(d, 1));
   const goToToday = () => setSelectedDate(new Date());
 
-  // Compute timeline bounds (snap to hour boundaries)
+  // Click on empty space to create event
+  const handleTimelineClick = (e: React.MouseEvent) => {
+    if (dragState?.hasMoved) return;
+    const target = e.target as HTMLElement;
+    // Only trigger on the container itself or hour marker lines
+    if (target !== containerRef.current && !target.dataset.timelineBackground) return;
+    const rect = containerRef.current!.getBoundingClientRect();
+    const clickY = e.clientY - rect.top;
+    const clickMin = timelineStartMin + clickY / PX_PER_MIN;
+    const snappedMin = Math.round(clickMin / 15) * 15;
+    const startTime = minutesToTime(snappedMin);
+    const endTime = minutesToTime(snappedMin + 30);
+    setEditorState({
+      mode: "create",
+      initialData: { name: "", start: startTime, end: endTime, date: dateStr },
+    });
+  };
+
+  // Click on editable block to edit
+  const handleBlockClick = (block: TimeBlock) => {
+    if (dragState?.hasMoved) return;
+    if (!block.editable) return;
+    setEditorState({
+      mode: "edit",
+      blockId: block.id,
+      blockType: block.type === "custom" ? "custom" : "routine",
+      initialData: { name: block.name, start: block.start, end: block.end, date: dateStr },
+    });
+  };
+
+  // Compute timeline bounds
   const allMinutes = blocks.flatMap((b) => [timeToMinutes(b.start), timeToMinutes(b.end)]);
   const rawStart = allMinutes.length > 0 ? Math.min(...allMinutes) : 5 * 60;
   const rawEnd = allMinutes.length > 0 ? Math.max(...allMinutes) : 23 * 60;
-  const timelineStartMin = Math.floor(rawStart / 60) * 60; // snap to hour
+  const timelineStartMin = Math.floor(rawStart / 60) * 60;
   const timelineEndMin = Math.ceil(rawEnd / 60) * 60;
   const totalMinutes = timelineEndMin - timelineStartMin;
   const totalHeight = totalMinutes * PX_PER_MIN;
@@ -130,9 +305,9 @@ export default function DayTimeline() {
   const minToY = (min: number) => (min - timelineStartMin) * PX_PER_MIN;
 
   const currentTimeY = minToY(currentMinutes);
-  const showCurrentLine = isViewingToday && currentMinutes >= timelineStartMin && currentMinutes <= timelineEndMin;
+  const showCurrentLine =
+    isViewingToday && currentMinutes >= timelineStartMin && currentMinutes <= timelineEndMin;
 
-  // Hour markers
   const hourMarkers: number[] = [];
   for (let h = Math.ceil(timelineStartMin / 60); h <= Math.floor(timelineEndMin / 60); h++) {
     hourMarkers.push(h);
@@ -177,17 +352,44 @@ export default function DayTimeline() {
         {format(selectedDate, "EEEE, MMMM d, yyyy")}
       </p>
 
+      {/* Add event button */}
+      <button
+        onClick={() =>
+          setEditorState({
+            mode: "create",
+            initialData: { name: "", start: "09:00", end: "09:30", date: dateStr },
+          })
+        }
+        className="mb-4 text-sm text-violet-400 hover:text-violet-300 transition-colors inline-flex items-center gap-1.5"
+      >
+        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+        </svg>
+        Add event
+      </button>
+
       {blocks.length === 0 ? (
         <p className="text-slate-500 text-center py-8">Nothing scheduled</p>
       ) : (
-        <div className="relative" style={{ height: `${totalHeight}px` }}>
+        <div
+          ref={containerRef}
+          className="relative select-none"
+          style={{ height: `${totalHeight}px`, touchAction: dragState ? "none" : "auto" }}
+          onClick={handleTimelineClick}
+        >
+          {/* Clickable background layer */}
+          <div
+            data-timeline-background="true"
+            className="absolute inset-0"
+          />
+
           {/* Hour markers */}
           {hourMarkers.map((h) => {
             const y = minToY(h * 60);
             return (
               <div
                 key={h}
-                className="absolute left-0 right-0 flex items-center"
+                className="absolute left-0 right-0 flex items-center pointer-events-none"
                 style={{ top: `${y}px` }}
               >
                 <span className="text-xs text-slate-500 w-16 flex-shrink-0 text-right pr-3 font-mono">
@@ -218,8 +420,9 @@ export default function DayTimeline() {
 
           {/* Event blocks */}
           {blocks.map((block) => {
-            const startMin = timeToMinutes(block.start);
-            const endMin = timeToMinutes(block.end);
+            const isDragging = dragState?.blockId === block.id;
+            const startMin = isDragging ? dragState.currentStartMin : timeToMinutes(block.start);
+            const endMin = isDragging ? dragState.currentEndMin : timeToMinutes(block.end);
             const y = minToY(startMin);
             const h = Math.max((endMin - startMin) * PX_PER_MIN, 0);
 
@@ -243,21 +446,36 @@ export default function DayTimeline() {
               bgClass = "from-violet-500/20 to-purple-600/10 border-violet-400/50";
               dotClass = "bg-violet-400";
               textClass = "text-violet-300";
+            } else if (block.type === "custom") {
+              bgClass = "from-rose-500/20 to-pink-600/10 border-rose-400/50";
+              dotClass = "bg-rose-400";
+              textClass = "text-rose-300";
             }
+
+            const displayStart = isDragging ? minutesToTime(dragState.currentStartMin) : block.start;
+            const displayEnd = isDragging ? minutesToTime(dragState.currentEndMin) : block.end;
 
             return (
               <div
                 key={block.id}
-                className={`absolute left-20 right-2 rounded-xl border bg-gradient-to-r ${bgClass} px-3 py-1.5 z-10 overflow-hidden flex items-center`}
+                className={`absolute left-20 right-2 rounded-xl border bg-gradient-to-r ${bgClass} px-3 py-1.5 z-10 overflow-hidden ${
+                  block.editable
+                    ? isDragging
+                      ? "cursor-grabbing opacity-90 shadow-lg shadow-black/30 ring-2 ring-violet-500/30"
+                      : "cursor-grab hover:brightness-110"
+                    : ""
+                }`}
                 style={{ top: `${y}px`, height: `${h}px` }}
+                onPointerDown={(e) => {
+                  if (block.editable) handlePointerDown(e, block.id, "move");
+                }}
+                onClick={() => handleBlockClick(block)}
               >
                 <div className="flex items-center gap-2.5 min-w-0">
                   <div className={`w-2 h-2 rounded-full ${dotClass} flex-shrink-0`} />
-                  <p className={`font-semibold text-sm ${textClass} truncate`}>
-                    {block.name}
-                  </p>
+                  <p className={`font-semibold text-sm ${textClass} truncate`}>{block.name}</p>
                   <span className="text-xs text-slate-400 flex-shrink-0 ml-auto">
-                    {formatTime12h(block.start)} - {formatTime12h(block.end)}
+                    {formatTime12h(displayStart)} - {formatTime12h(displayEnd)}
                   </span>
                   {block.completed && (
                     <span className="text-emerald-400 text-xs font-bold bg-emerald-500/20 px-2 py-0.5 rounded-full flex-shrink-0">
@@ -265,10 +483,62 @@ export default function DayTimeline() {
                     </span>
                   )}
                 </div>
+                {/* Resize handle */}
+                {block.editable && (
+                  <div
+                    className="absolute bottom-0 left-0 right-0 h-3 cursor-s-resize group"
+                    onPointerDown={(e) => {
+                      e.stopPropagation();
+                      handlePointerDown(e, block.id, "resize");
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <div className="mx-auto w-8 h-1 rounded-full bg-white/15 group-hover:bg-white/40 mt-1" />
+                  </div>
+                )}
               </div>
             );
           })}
         </div>
+      )}
+
+      {/* Event Editor Modal */}
+      {editorState && (
+        <EventEditor
+          mode={editorState.mode}
+          eventType={editorState.blockType}
+          initialData={editorState.initialData}
+          onSave={(data) => {
+            if (editorState.mode === "create") {
+              addCustomEvent({ name: data.name, date: data.date, start: data.start, end: data.end });
+            } else if (editorState.blockType === "custom") {
+              updateCustomEvent(editorState.blockId!, { name: data.name, start: data.start, end: data.end, date: data.date });
+            } else if (editorState.blockType === "routine") {
+              setRoutineOverride(editorState.blockId!, data.date, data.start, data.end);
+            }
+            setEditorState(null);
+            loadData();
+          }}
+          onDelete={
+            editorState.blockType === "custom"
+              ? () => {
+                  removeCustomEvent(editorState.blockId!);
+                  setEditorState(null);
+                  loadData();
+                }
+              : undefined
+          }
+          onResetRoutine={
+            editorState.blockType === "routine" && editorState.mode === "edit"
+              ? () => {
+                  removeRoutineOverride(editorState.blockId!, dateStr);
+                  setEditorState(null);
+                  loadData();
+                }
+              : undefined
+          }
+          onClose={() => setEditorState(null)}
+        />
       )}
     </div>
   );
