@@ -5,6 +5,7 @@ import { format } from "date-fns";
 import { getRoutineForDate, getCurrentWeek } from "@/lib/routine";
 import { fetchSportsSchedules, getGamesForDate } from "@/lib/sports";
 import { isCompleted } from "@/lib/streaks";
+import { formatTime12h } from "@/lib/timeFormat";
 
 interface TimeBlock {
   id: string;
@@ -136,7 +137,7 @@ export default function DayTimeline() {
                   )}
                 </div>
                 <span className="text-slate-400 text-xs">
-                  {block.start} - {block.end}
+                  {formatTime12h(block.start)} - {formatTime12h(block.end)}
                 </span>
               </div>
             );

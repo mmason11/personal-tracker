@@ -5,6 +5,7 @@ import { format } from "date-fns";
 import { RoutineItem } from "@/lib/types";
 import { getRoutineForDate, getCurrentWeek, getWakeUpTime } from "@/lib/routine";
 import { toggleCompletion, isCompleted, calculateStreak } from "@/lib/streaks";
+import { formatTime12h } from "@/lib/timeFormat";
 
 export default function RoutineTracker() {
   const [routine, setRoutine] = useState<RoutineItem[]>([]);
@@ -49,7 +50,7 @@ export default function RoutineTracker() {
         )}
       </div>
       <p className="text-sm text-slate-400 mb-4">
-        Week {week}/5 &middot; Wake-up: {getWakeUpTime(week)} AM
+        Week {week}/5 &middot; Wake-up: {formatTime12h(getWakeUpTime(week))}
       </p>
 
       <div className="space-y-3">
@@ -81,7 +82,7 @@ export default function RoutineTracker() {
                 {item.name}
               </span>
               <span className="text-slate-400 text-sm ml-2">
-                {item.time}{item.endTime ? ` - ${item.endTime}` : ""}
+                {formatTime12h(item.time)}{item.endTime ? ` - ${formatTime12h(item.endTime)}` : ""}
               </span>
               {item.weekdaysOnly && (
                 <span className="text-xs text-slate-500 ml-2">(weekdays)</span>

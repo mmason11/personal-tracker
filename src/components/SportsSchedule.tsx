@@ -6,6 +6,7 @@ import { SportsGame, Conflict } from "@/lib/types";
 import { fetchSportsSchedules, getUpcomingGames } from "@/lib/sports";
 import { getRoutineForDate, getCurrentWeek } from "@/lib/routine";
 import { detectConflicts } from "@/lib/conflicts";
+import { formatTime12h } from "@/lib/timeFormat";
 
 export default function SportsSchedule() {
   const [games, setGames] = useState<SportsGame[]>([]);
@@ -116,7 +117,7 @@ export default function SportsSchedule() {
                     </div>
                     <p className="text-sm text-slate-400">
                       {format(new Date(game.date), "EEE, MMM d")} &middot;{" "}
-                      {game.time} - {game.endTime}
+                      {formatTime12h(game.time)} - {formatTime12h(game.endTime)}
                     </p>
                     <p className="text-xs text-slate-500 mt-0.5">
                       {game.venue} &middot; {game.competition}
