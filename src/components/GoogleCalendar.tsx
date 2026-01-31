@@ -171,6 +171,7 @@ export default function GoogleCalendar() {
       end: { dateTime: string; timeZone: string };
       description?: string;
       colorId?: string;
+      reminders?: { useDefault: boolean; overrides: never[] };
     }> = [];
 
     const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -188,6 +189,7 @@ export default function GoogleCalendar() {
           end: { dateTime: `${dateStr}T${item.endTime}:00`, timeZone: tz },
           description: "Synced from Personal Tracker",
           colorId: "2",
+          reminders: { useDefault: false, overrides: [] },
         });
       });
     }
@@ -206,6 +208,7 @@ export default function GoogleCalendar() {
           end: { dateTime: `${dateStr}T${game.endTime}:00`, timeZone: tz },
           description: `${game.venue} | ${game.competition} | ${game.isHome ? "Home" : "Away"}\nSynced from Personal Tracker`,
           colorId: game.team === "man-city" ? "7" : "6",
+          reminders: { useDefault: false, overrides: [] },
         });
       });
     } catch {

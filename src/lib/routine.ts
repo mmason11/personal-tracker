@@ -55,6 +55,13 @@ export function getDefaultRoutine(week: number): RoutineItem[] {
       },
     },
     {
+      id: "work",
+      name: "Work",
+      time: "08:00",
+      endTime: "17:00",
+      weekdaysOnly: true,
+    },
+    {
       id: "lunch",
       name: "Lunch Break",
       time: "13:00",
@@ -68,28 +75,10 @@ export function getDefaultRoutine(week: number): RoutineItem[] {
       endTime: "18:15",
     },
     {
-      id: "dinner",
-      name: "Dinner",
-      time: "18:15",
-      endTime: "19:00",
-    },
-    {
       id: "wash-face",
       name: "Wash Face & Brush Teeth",
       time: "21:00",
       endTime: "21:15",
-    },
-    {
-      id: "reading",
-      name: "Reading Before Bed",
-      time: "21:15",
-      endTime: "21:30",
-    },
-    {
-      id: "lights-out",
-      name: "Lights Out",
-      time: "21:30",
-      endTime: "21:45",
     },
   ];
 }
