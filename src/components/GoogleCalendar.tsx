@@ -1,10 +1,11 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { format, addDays } from "date-fns";
+import { format, addDays, startOfWeek, isToday, isSameDay } from "date-fns";
 import { CalendarEvent } from "@/lib/types";
 import { getRoutineForDate, getCurrentWeek } from "@/lib/routine";
 import { fetchSportsSchedules, getUpcomingGames } from "@/lib/sports";
+import { formatTime12h } from "@/lib/timeFormat";
 
 export default function GoogleCalendar() {
   const [connected, setConnected] = useState(false);
@@ -12,12 +13,21 @@ export default function GoogleCalendar() {
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState<string | null>(null);
+  const [weekStart, setWeekStart] = useState(() =>
+    startOfWeek(new Date(), { weekStartsOn: 0 })
+  );
+
+  const weekDays = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
+
+  const goToPrevWeek = () => setWeekStart((d) => addDays(d, -7));
+  const goToNextWeek = () => setWeekStart((d) => addDays(d, 7));
+  const goToThisWeek = () =>
+    setWeekStart(startOfWeek(new Date(), { weekStartsOn: 0 }));
 
   const getValidToken = useCallback(async (): Promise<string | null> => {
     const token = localStorage.getItem("google_access_token");
     if (!token) return null;
 
-    // Try token, refresh if needed
     const testRes = await fetch(`/api/calendar?action=events&token=${token}`);
     if (testRes.ok) return token;
 
@@ -37,34 +47,39 @@ export default function GoogleCalendar() {
     return null;
   }, []);
 
-  const fetchEvents = useCallback(async (token: string) => {
-    setLoading(true);
-    try {
-      const res = await fetch(`/api/calendar?action=events&token=${token}`);
-      if (res.ok) {
-        const data = await res.json();
-        setEvents(data);
-        setConnected(true);
-      } else {
-        const validToken = await getValidToken();
-        if (validToken && validToken !== token) {
-          const retryRes = await fetch(`/api/calendar?action=events&token=${validToken}`);
-          if (retryRes.ok) {
-            const data = await retryRes.json();
-            setEvents(data);
-            setConnected(true);
+  const fetchEvents = useCallback(
+    async (token: string) => {
+      setLoading(true);
+      try {
+        const res = await fetch(`/api/calendar?action=events&token=${token}`);
+        if (res.ok) {
+          const data = await res.json();
+          setEvents(data);
+          setConnected(true);
+        } else {
+          const validToken = await getValidToken();
+          if (validToken && validToken !== token) {
+            const retryRes = await fetch(
+              `/api/calendar?action=events&token=${validToken}`
+            );
+            if (retryRes.ok) {
+              const data = await retryRes.json();
+              setEvents(data);
+              setConnected(true);
+            } else {
+              setConnected(false);
+            }
           } else {
             setConnected(false);
           }
-        } else {
-          setConnected(false);
         }
+      } catch {
+        console.error("Failed to fetch calendar events");
       }
-    } catch {
-      console.error("Failed to fetch calendar events");
-    }
-    setLoading(false);
-  }, [getValidToken]);
+      setLoading(false);
+    },
+    [getValidToken]
+  );
 
   useEffect(() => {
     const token = localStorage.getItem("google_access_token");
@@ -131,7 +146,6 @@ export default function GoogleCalendar() {
 
     const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
-    // Build routine events for the next 14 days
     for (let i = 0; i < 14; i++) {
       const date = addDays(new Date(), i);
       const dateStr = format(date, "yyyy-MM-dd");
@@ -144,29 +158,29 @@ export default function GoogleCalendar() {
           start: { dateTime: `${dateStr}T${item.time}:00`, timeZone: tz },
           end: { dateTime: `${dateStr}T${item.endTime}:00`, timeZone: tz },
           description: "Synced from Personal Tracker",
-          colorId: "2", // Sage/green
+          colorId: "2",
         });
       });
     }
 
-    // Build sports events
     try {
       const allGames = await fetchSportsSchedules();
       const upcoming = getUpcomingGames(allGames, 30);
 
       upcoming.forEach((game) => {
         const dateStr = format(new Date(game.date), "yyyy-MM-dd");
-        const teamName = game.team === "man-city" ? "Man City" : "Illinois Basketball";
+        const teamName =
+          game.team === "man-city" ? "Man City" : "Illinois Basketball";
         gcalEvents.push({
           summary: `[Game] ${teamName} vs ${game.opponent}`,
           start: { dateTime: `${dateStr}T${game.time}:00`, timeZone: tz },
           end: { dateTime: `${dateStr}T${game.endTime}:00`, timeZone: tz },
           description: `${game.venue} | ${game.competition} | ${game.isHome ? "Home" : "Away"}\nSynced from Personal Tracker`,
-          colorId: game.team === "man-city" ? "7" : "6", // Peacock / Tangerine
+          colorId: game.team === "man-city" ? "7" : "6",
         });
       });
     } catch {
-      // Continue without sports if fetch fails
+      // Continue without sports
     }
 
     try {
@@ -185,7 +199,6 @@ export default function GoogleCalendar() {
         if (result.errors > 0) parts.push(`${result.errors} errors`);
         setSyncResult(parts.join(", ") || "Nothing to sync");
       }
-      // Refresh events
       fetchEvents(token);
     } catch {
       setSyncResult("Sync failed");
@@ -194,85 +207,127 @@ export default function GoogleCalendar() {
     setSyncing(false);
   };
 
+  const getEventsForDay = (date: Date): CalendarEvent[] => {
+    const dateStr = format(date, "yyyy-MM-dd");
+    return events
+      .filter((e) => e.start.startsWith(dateStr))
+      .sort((a, b) => a.start.localeCompare(b.start));
+  };
+
+  const getEventStyle = (summary: string) => {
+    if (summary.startsWith("[Routine]"))
+      return {
+        bg: "bg-emerald-500/15 border-emerald-500/30",
+        text: "text-emerald-300",
+        time: "text-emerald-400/60",
+      };
+    if (summary.startsWith("[Game]"))
+      return {
+        bg: "bg-sky-500/15 border-sky-500/30",
+        text: "text-sky-300",
+        time: "text-sky-400/60",
+      };
+    return {
+      bg: "bg-violet-500/15 border-violet-500/30",
+      text: "text-violet-300",
+      time: "text-violet-400/60",
+    };
+  };
+
   const formatEventTime = (dateStr: string) => {
     try {
-      return new Date(dateStr).toLocaleTimeString([], {
-        hour: "numeric",
-        minute: "2-digit",
-      });
+      const t = dateStr.substring(11, 16);
+      if (!t) return "";
+      return formatTime12h(t);
     } catch {
-      return dateStr;
+      return "";
     }
   };
 
-  const formatEventDate = (dateStr: string) => {
-    try {
-      return new Date(dateStr).toLocaleDateString([], {
-        weekday: "short",
-        month: "short",
-        day: "numeric",
-      });
-    } catch {
-      return dateStr;
-    }
-  };
-
-  const getEventColor = (summary: string) => {
-    if (summary.startsWith("[Routine]")) return "border-l-emerald-500";
-    if (summary.startsWith("[Game]")) return "border-l-sky-500";
-    return "border-l-violet-500";
-  };
+  const cleanSummary = (s: string) => s.replace(/^\[(Routine|Game)\] /, "");
 
   return (
-    <div className="bg-gradient-to-br from-slate-800 to-slate-800/80 rounded-2xl p-6 shadow-lg border border-slate-700/50">
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="text-xl font-bold text-white">Google Calendar</h2>
-        {connected && (
-          <div className="flex items-center gap-3">
-            <button
-              onClick={handleSyncToGoogle}
-              disabled={syncing}
-              className="text-sm font-semibold px-3 py-1.5 bg-gradient-to-r from-violet-600 to-blue-600 text-white rounded-lg hover:from-violet-500 hover:to-blue-500 transition-all disabled:opacity-50 shadow-lg shadow-violet-500/20 inline-flex items-center gap-1.5"
-            >
-              {syncing ? (
-                <>
-                  <svg className="w-3.5 h-3.5 animate-spin" viewBox="0 0 24 24" fill="none">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                  </svg>
-                  Syncing...
-                </>
-              ) : (
-                <>
-                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                  </svg>
-                  Sync to Google
-                </>
-              )}
-            </button>
-            <button
-              onClick={handleDisconnect}
-              className="text-sm text-slate-400 hover:text-red-400 transition-colors"
-            >
-              Disconnect
-            </button>
+    <div className="space-y-4">
+      {/* Header bar */}
+      <div className="bg-gradient-to-br from-slate-800 to-slate-800/80 rounded-2xl p-5 shadow-lg border border-slate-700/50">
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <h2 className="text-xl font-bold text-white">Calendar</h2>
+          <div className="flex items-center gap-2 flex-wrap">
+            {connected && (
+              <>
+                <button
+                  onClick={handleSyncToGoogle}
+                  disabled={syncing}
+                  className="text-sm font-semibold px-3 py-1.5 bg-gradient-to-r from-violet-600 to-blue-600 text-white rounded-lg hover:from-violet-500 hover:to-blue-500 transition-all disabled:opacity-50 shadow-lg shadow-violet-500/20 inline-flex items-center gap-1.5"
+                >
+                  {syncing ? (
+                    <>
+                      <svg
+                        className="w-3.5 h-3.5 animate-spin"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                      >
+                        <circle
+                          className="opacity-25"
+                          cx="12"
+                          cy="12"
+                          r="10"
+                          stroke="currentColor"
+                          strokeWidth="4"
+                        />
+                        <path
+                          className="opacity-75"
+                          fill="currentColor"
+                          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                        />
+                      </svg>
+                      Syncing...
+                    </>
+                  ) : (
+                    <>
+                      <svg
+                        className="w-3.5 h-3.5"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                        strokeWidth={2}
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                        />
+                      </svg>
+                      Sync to Google
+                    </>
+                  )}
+                </button>
+                <button
+                  onClick={handleDisconnect}
+                  className="text-sm text-slate-400 hover:text-red-400 transition-colors"
+                >
+                  Disconnect
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+
+        {syncResult && (
+          <div
+            className={`mt-3 p-3 rounded-xl text-sm border ${
+              syncResult.includes("Error") || syncResult.includes("failed")
+                ? "bg-red-500/10 border-red-500/30 text-red-400"
+                : "bg-emerald-500/10 border-emerald-500/30 text-emerald-400"
+            }`}
+          >
+            {syncResult}
           </div>
         )}
       </div>
 
-      {syncResult && (
-        <div className={`mb-4 p-3 rounded-xl text-sm border ${
-          syncResult.includes("Error") || syncResult.includes("failed")
-            ? "bg-red-500/10 border-red-500/30 text-red-400"
-            : "bg-emerald-500/10 border-emerald-500/30 text-emerald-400"
-        }`}>
-          {syncResult}
-        </div>
-      )}
-
       {!connected ? (
-        <div className="text-center py-6">
+        <div className="bg-gradient-to-br from-slate-800 to-slate-800/80 rounded-2xl p-6 shadow-lg border border-slate-700/50 text-center py-12">
           <div className="mb-4">
             <svg
               className="w-12 h-12 mx-auto text-slate-500"
@@ -302,37 +357,188 @@ export default function GoogleCalendar() {
           </button>
         </div>
       ) : loading ? (
-        <div className="animate-pulse space-y-3">
-          {[1, 2, 3].map((i) => (
-            <div key={i} className="h-14 bg-slate-700 rounded-xl" />
-          ))}
+        <div className="bg-gradient-to-br from-slate-800 to-slate-800/80 rounded-2xl p-6 shadow-lg border border-slate-700/50">
+          <div className="animate-pulse space-y-3">
+            {[1, 2, 3].map((i) => (
+              <div key={i} className="h-20 bg-slate-700 rounded-xl" />
+            ))}
+          </div>
         </div>
-      ) : events.length === 0 ? (
-        <p className="text-slate-400 text-center py-6">No upcoming events. Hit &quot;Sync to Google&quot; to export your routine and games.</p>
       ) : (
-        <div className="space-y-2 max-h-[500px] overflow-y-auto">
-          {events.map((event) => (
-            <div
-              key={event.id}
-              className={`p-3 rounded-xl bg-slate-700/40 border border-slate-600/30 border-l-4 ${getEventColor(event.summary)}`}
-            >
-              <p className="text-white font-medium text-sm">
-                {event.summary.replace(/^\[(Routine|Game)\] /, "")}
-              </p>
-              <div className="flex items-center gap-2 mt-1">
-                {event.summary.startsWith("[Routine]") && (
-                  <span className="text-xs bg-emerald-500/15 text-emerald-400 px-1.5 py-0.5 rounded">Routine</span>
-                )}
-                {event.summary.startsWith("[Game]") && (
-                  <span className="text-xs bg-sky-500/15 text-sky-400 px-1.5 py-0.5 rounded">Game</span>
-                )}
-                <p className="text-slate-400 text-xs">
-                  {formatEventDate(event.start)} &middot; {formatEventTime(event.start)} - {formatEventTime(event.end)}
-                </p>
-              </div>
+        <>
+          {/* Week navigation */}
+          <div className="bg-gradient-to-br from-slate-800 to-slate-800/80 rounded-2xl p-4 shadow-lg border border-slate-700/50">
+            <div className="flex items-center justify-between">
+              <button
+                onClick={goToPrevWeek}
+                className="p-2 rounded-lg bg-slate-700/60 hover:bg-slate-600 text-slate-300 hover:text-white transition-all"
+              >
+                <svg
+                  className="w-4 h-4"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={2.5}
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M15 19l-7-7 7-7"
+                  />
+                </svg>
+              </button>
+              <button
+                onClick={goToThisWeek}
+                className="text-sm font-semibold text-white"
+              >
+                {format(weekDays[0], "MMM d")} &ndash;{" "}
+                {format(weekDays[6], "MMM d, yyyy")}
+              </button>
+              <button
+                onClick={goToNextWeek}
+                className="p-2 rounded-lg bg-slate-700/60 hover:bg-slate-600 text-slate-300 hover:text-white transition-all"
+              >
+                <svg
+                  className="w-4 h-4"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={2.5}
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M9 5l7 7-7 7"
+                  />
+                </svg>
+              </button>
             </div>
-          ))}
-        </div>
+          </div>
+
+          {/* Desktop: 7-column grid */}
+          <div className="hidden md:grid grid-cols-7 gap-2">
+            {weekDays.map((day) => {
+              const dayEvents = getEventsForDay(day);
+              const today = isToday(day);
+              return (
+                <div
+                  key={day.toISOString()}
+                  className={`bg-gradient-to-br from-slate-800 to-slate-800/80 rounded-2xl p-3 shadow-lg border min-h-[200px] transition-all ${
+                    today
+                      ? "border-violet-500/50 ring-1 ring-violet-500/20"
+                      : "border-slate-700/50"
+                  }`}
+                >
+                  <div className="text-center mb-3">
+                    <p className="text-xs text-slate-500 uppercase font-medium">
+                      {format(day, "EEE")}
+                    </p>
+                    <p
+                      className={`text-lg font-bold ${
+                        today ? "text-violet-400" : "text-white"
+                      }`}
+                    >
+                      {format(day, "d")}
+                    </p>
+                  </div>
+                  <div className="space-y-1.5">
+                    {dayEvents.length === 0 && (
+                      <p className="text-xs text-slate-600 text-center pt-2">
+                        --
+                      </p>
+                    )}
+                    {dayEvents.map((evt) => {
+                      const style = getEventStyle(evt.summary);
+                      return (
+                        <div
+                          key={evt.id}
+                          className={`p-1.5 rounded-lg border text-xs ${style.bg}`}
+                        >
+                          <p className={`font-medium truncate ${style.text}`}>
+                            {cleanSummary(evt.summary)}
+                          </p>
+                          <p className={`${style.time} text-[10px]`}>
+                            {formatEventTime(evt.start)}
+                          </p>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Mobile: stacked days */}
+          <div className="md:hidden space-y-3">
+            {weekDays.map((day) => {
+              const dayEvents = getEventsForDay(day);
+              const today = isToday(day);
+              if (dayEvents.length === 0 && !today && !isSameDay(day, weekDays[0])) return null;
+              return (
+                <div
+                  key={day.toISOString()}
+                  className={`bg-gradient-to-br from-slate-800 to-slate-800/80 rounded-2xl p-4 shadow-lg border ${
+                    today
+                      ? "border-violet-500/50 ring-1 ring-violet-500/20"
+                      : "border-slate-700/50"
+                  }`}
+                >
+                  <div className="flex items-center gap-3 mb-3">
+                    <div
+                      className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold ${
+                        today
+                          ? "bg-violet-500/20 text-violet-400"
+                          : "bg-slate-700/60 text-white"
+                      }`}
+                    >
+                      {format(day, "d")}
+                    </div>
+                    <div>
+                      <p className="text-white font-semibold text-sm">
+                        {format(day, "EEEE")}
+                      </p>
+                      <p className="text-slate-400 text-xs">
+                        {format(day, "MMMM d")}
+                      </p>
+                    </div>
+                    {today && (
+                      <span className="ml-auto text-xs font-bold text-violet-400 bg-violet-500/15 px-2 py-0.5 rounded-full">
+                        Today
+                      </span>
+                    )}
+                  </div>
+                  {dayEvents.length === 0 ? (
+                    <p className="text-xs text-slate-500 pl-13">
+                      No events
+                    </p>
+                  ) : (
+                    <div className="space-y-1.5">
+                      {dayEvents.map((evt) => {
+                        const style = getEventStyle(evt.summary);
+                        return (
+                          <div
+                            key={evt.id}
+                            className={`p-2.5 rounded-xl border ${style.bg} flex items-center gap-3`}
+                          >
+                            <span className={`text-xs font-mono flex-shrink-0 ${style.time}`}>
+                              {formatEventTime(evt.start)}
+                            </span>
+                            <p
+                              className={`font-medium text-sm truncate ${style.text}`}
+                            >
+                              {cleanSummary(evt.summary)}
+                            </p>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </>
       )}
     </div>
   );
