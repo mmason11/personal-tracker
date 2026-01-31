@@ -226,8 +226,8 @@ export default function GoogleCalendar() {
         setSyncResult(`Error: ${result.error}`);
       } else {
         const parts: string[] = [];
+        if (result.deleted > 0) parts.push(`${result.deleted} old removed`);
         if (result.created > 0) parts.push(`${result.created} created`);
-        if (result.skipped > 0) parts.push(`${result.skipped} already exist`);
         if (result.errors > 0) parts.push(`${result.errors} errors`);
         setSyncResult(parts.join(", ") || "Nothing to sync");
       }

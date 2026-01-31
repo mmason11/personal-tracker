@@ -155,44 +155,54 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "No token" }, { status: 401 });
     }
 
-    const results: { created: number; skipped: number; errors: number } = {
+    const results: { deleted: number; created: number; errors: number } = {
+      deleted: 0,
       created: 0,
-      skipped: 0,
       errors: 0,
     };
 
-    // First, fetch existing events to avoid duplicates
+    // Delete all existing [Routine] and [Game] events first
     const now = new Date();
-    const timeMin = now.toISOString();
-    const future = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+    const past = new Date(now.getTime() - 1 * 24 * 60 * 60 * 1000);
+    const timeMin = past.toISOString();
+    const future = new Date(now.getTime() + 60 * 24 * 60 * 60 * 1000);
     const timeMax = future.toISOString();
 
-    let existingSummaries = new Set<string>();
     try {
       const existingRes = await fetch(
-        `https://www.googleapis.com/calendar/v3/calendars/primary/events?timeMin=${timeMin}&timeMax=${timeMax}&singleEvents=true&maxResults=500`,
+        `https://www.googleapis.com/calendar/v3/calendars/primary/events?timeMin=${timeMin}&timeMax=${timeMax}&singleEvents=true&maxResults=2500`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
       if (existingRes.ok) {
         const existingData = await existingRes.json();
-        existingSummaries = new Set(
-          (existingData.items || []).map(
-            (e: { summary?: string; start?: { dateTime?: string } }) =>
-              `${e.summary || ""}|${e.start?.dateTime || ""}`
-          )
+        const syncedEvents = (existingData.items || []).filter(
+          (e: { summary?: string }) =>
+            e.summary?.startsWith("[Routine]") || e.summary?.startsWith("[Game]")
         );
+
+        for (const evt of syncedEvents) {
+          try {
+            const delRes = await fetch(
+              `https://www.googleapis.com/calendar/v3/calendars/primary/events/${evt.id}`,
+              {
+                method: "DELETE",
+                headers: { Authorization: `Bearer ${token}` },
+              }
+            );
+            if (delRes.ok || delRes.status === 204) {
+              results.deleted++;
+            }
+          } catch {
+            // Continue deleting others
+          }
+        }
       }
     } catch {
-      // Continue even if we can't check duplicates
+      // Continue with creation even if delete fails
     }
 
+    // Create all new events
     for (const event of events) {
-      const key = `${event.summary}|${event.start?.dateTime || ""}`;
-      if (existingSummaries.has(key)) {
-        results.skipped++;
-        continue;
-      }
-
       try {
         const res = await fetch(
           "https://www.googleapis.com/calendar/v3/calendars/primary/events",
