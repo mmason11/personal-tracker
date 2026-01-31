@@ -26,6 +26,9 @@ function getCurrentTimeMinutes(): number {
   return now.getHours() * 60 + now.getMinutes();
 }
 
+// Pixels per minute — controls how tall each time slot is
+const PX_PER_MIN = 1.8;
+
 export default function DayTimeline() {
   const [blocks, setBlocks] = useState<TimeBlock[]>([]);
   const [selectedDate, setSelectedDate] = useState(new Date());
@@ -42,14 +45,16 @@ export default function DayTimeline() {
     const timeBlocks: TimeBlock[] = [];
 
     routine.forEach((item) => {
-      timeBlocks.push({
-        id: item.id,
-        name: item.name,
-        start: item.time,
-        end: item.endTime || item.time,
-        type: "routine",
-        completed: isCompleted(item.id, dateStr),
-      });
+      if (item.endTime) {
+        timeBlocks.push({
+          id: item.id,
+          name: item.name,
+          start: item.time,
+          end: item.endTime,
+          type: "routine",
+          completed: isCompleted(item.id, dateStr),
+        });
+      }
     });
 
     dayGames.forEach((game) => {
@@ -70,7 +75,6 @@ export default function DayTimeline() {
     loadData();
   }, [loadData]);
 
-  // Update current time every minute
   useEffect(() => {
     const interval = setInterval(() => {
       setCurrentMinutes(getCurrentTimeMinutes());
@@ -82,31 +86,29 @@ export default function DayTimeline() {
   const goToNext = () => setSelectedDate((d) => addDays(d, 1));
   const goToToday = () => setSelectedDate(new Date());
 
-  // Timeline spans from earliest block - 1hr to latest block + 1hr
+  // Compute timeline bounds (snap to hour boundaries)
   const allMinutes = blocks.flatMap((b) => [timeToMinutes(b.start), timeToMinutes(b.end)]);
-  const timelineStart = allMinutes.length > 0 ? Math.max(0, Math.min(...allMinutes) - 60) : 5 * 60;
-  const timelineEnd = allMinutes.length > 0 ? Math.min(24 * 60, Math.max(...allMinutes) + 60) : 23 * 60;
-  const timelineRange = timelineEnd - timelineStart;
+  const rawStart = allMinutes.length > 0 ? Math.min(...allMinutes) : 5 * 60;
+  const rawEnd = allMinutes.length > 0 ? Math.max(...allMinutes) : 23 * 60;
+  const timelineStartMin = Math.floor(rawStart / 60) * 60; // snap to hour
+  const timelineEndMin = Math.ceil(rawEnd / 60) * 60;
+  const totalMinutes = timelineEndMin - timelineStartMin;
+  const totalHeight = totalMinutes * PX_PER_MIN;
 
-  const getTopPercent = (time: string) => {
-    const mins = timeToMinutes(time);
-    return ((mins - timelineStart) / timelineRange) * 100;
-  };
+  const minToY = (min: number) => (min - timelineStartMin) * PX_PER_MIN;
 
-  const currentTimePercent = ((currentMinutes - timelineStart) / timelineRange) * 100;
-  const showCurrentLine = isViewingToday && currentTimePercent >= 0 && currentTimePercent <= 100;
+  const currentTimeY = minToY(currentMinutes);
+  const showCurrentLine = isViewingToday && currentMinutes >= timelineStartMin && currentMinutes <= timelineEndMin;
 
-  // Generate hour markers
-  const firstHour = Math.ceil(timelineStart / 60);
-  const lastHour = Math.floor(timelineEnd / 60);
-  const hourMarkers = [];
-  for (let h = firstHour; h <= lastHour; h++) {
+  // Hour markers
+  const hourMarkers: number[] = [];
+  for (let h = Math.ceil(timelineStartMin / 60); h <= Math.floor(timelineEndMin / 60); h++) {
     hourMarkers.push(h);
   }
 
   return (
     <div className="bg-gradient-to-br from-slate-800 to-slate-800/80 rounded-2xl p-6 shadow-lg border border-slate-700/50">
-      {/* Header with day navigation */}
+      {/* Header */}
       <div className="flex items-center justify-between mb-5">
         <h2 className="text-xl font-bold text-white">Timeline</h2>
         <div className="flex items-center gap-2">
@@ -146,15 +148,15 @@ export default function DayTimeline() {
       {blocks.length === 0 ? (
         <p className="text-slate-500 text-center py-8">Nothing scheduled</p>
       ) : (
-        <div className="relative" style={{ minHeight: `${Math.max(blocks.length * 72, 300)}px` }}>
+        <div className="relative" style={{ height: `${totalHeight}px` }}>
           {/* Hour markers */}
           {hourMarkers.map((h) => {
-            const top = getTopPercent(`${h.toString().padStart(2, "0")}:00`);
+            const y = minToY(h * 60);
             return (
               <div
                 key={h}
                 className="absolute left-0 right-0 flex items-center"
-                style={{ top: `${top}%` }}
+                style={{ top: `${y}px` }}
               >
                 <span className="text-xs text-slate-500 w-16 flex-shrink-0 text-right pr-3 font-mono">
                   {h === 0 ? "12 AM" : h < 12 ? `${h} AM` : h === 12 ? "12 PM" : `${h - 12} PM`}
@@ -168,10 +170,12 @@ export default function DayTimeline() {
           {showCurrentLine && (
             <div
               className="absolute left-0 right-0 flex items-center z-20 pointer-events-none"
-              style={{ top: `${currentTimePercent}%` }}
+              style={{ top: `${currentTimeY}px` }}
             >
               <span className="text-xs text-red-400 w-16 flex-shrink-0 text-right pr-3 font-bold font-mono">
-                {formatTime12h(`${Math.floor(currentMinutes / 60).toString().padStart(2, "0")}:${(currentMinutes % 60).toString().padStart(2, "0")}`)}
+                {formatTime12h(
+                  `${Math.floor(currentMinutes / 60).toString().padStart(2, "0")}:${(currentMinutes % 60).toString().padStart(2, "0")}`
+                )}
               </span>
               <div className="relative flex-1">
                 <div className="absolute -left-1.5 -top-1.5 w-3 h-3 bg-red-500 rounded-full shadow-lg shadow-red-500/50" />
@@ -182,9 +186,10 @@ export default function DayTimeline() {
 
           {/* Event blocks */}
           {blocks.map((block) => {
-            const top = getTopPercent(block.start);
-            const bottom = getTopPercent(block.end);
-            const height = Math.max(bottom - top, 5);
+            const startMin = timeToMinutes(block.start);
+            const endMin = timeToMinutes(block.end);
+            const y = minToY(startMin);
+            const h = Math.max((endMin - startMin) * PX_PER_MIN, 0);
 
             let bgClass = "from-blue-500/20 to-blue-600/10 border-blue-500/40";
             let dotClass = "bg-blue-400";
@@ -207,21 +212,19 @@ export default function DayTimeline() {
             return (
               <div
                 key={block.id}
-                className={`absolute left-20 right-2 rounded-xl border bg-gradient-to-r ${bgClass} p-3 z-10 transition-all hover:scale-[1.01] hover:shadow-lg`}
-                style={{ top: `${top}%`, height: `${height}%`, minHeight: "52px" }}
+                className={`absolute left-20 right-2 rounded-xl border bg-gradient-to-r ${bgClass} px-3 py-1.5 z-10 overflow-hidden flex items-center`}
+                style={{ top: `${y}px`, height: `${h}px` }}
               >
-                <div className="flex items-start gap-2.5">
-                  <div className={`w-2.5 h-2.5 rounded-full ${dotClass} mt-1 flex-shrink-0 shadow-sm`} />
-                  <div className="flex-1 min-w-0">
-                    <p className={`font-semibold text-sm ${textClass} leading-tight`}>
-                      {block.name}
-                    </p>
-                    <p className="text-xs text-slate-400 mt-0.5">
-                      {formatTime12h(block.start)} - {formatTime12h(block.end)}
-                    </p>
-                  </div>
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className={`w-2 h-2 rounded-full ${dotClass} flex-shrink-0`} />
+                  <p className={`font-semibold text-sm ${textClass} truncate`}>
+                    {block.name}
+                  </p>
+                  <span className="text-xs text-slate-400 flex-shrink-0 ml-auto">
+                    {formatTime12h(block.start)} - {formatTime12h(block.end)}
+                  </span>
                   {block.completed && (
-                    <span className="text-emerald-400 text-xs font-bold bg-emerald-500/20 px-2 py-0.5 rounded-full">
+                    <span className="text-emerald-400 text-xs font-bold bg-emerald-500/20 px-2 py-0.5 rounded-full flex-shrink-0">
                       Done
                     </span>
                   )}

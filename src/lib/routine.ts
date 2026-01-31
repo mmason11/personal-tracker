@@ -20,27 +20,38 @@ export function getCurrentWeek(): number {
   const now = new Date();
   const diffMs = now.getTime() - start.getTime();
   const diffWeeks = Math.floor(diffMs / (7 * 24 * 60 * 60 * 1000));
-  return Math.min(Math.max(diffWeeks + 1, 1), 5);
+  return Math.max(diffWeeks + 1, 1);
 }
 
 export function getWakeUpTime(week: number): string {
-  // Week 1: 7:00 AM → Week 5: 5:00 AM (30 min earlier each week)
-  const hours = 7 - (Math.min(week, 5) - 1) * 0.5;
-  const h = Math.floor(hours);
-  const m = (hours - h) * 60;
+  // Week 1: 6:30 AM → 30 min earlier each week → caps at 5:00 AM
+  const totalMinutes = 6 * 60 + 30 - (Math.min(week, 4) - 1) * 30;
+  const clamped = Math.max(totalMinutes, 5 * 60); // never earlier than 5:00 AM
+  const h = Math.floor(clamped / 60);
+  const m = clamped % 60;
   return `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`;
 }
 
+function addMinutesToTime(time: string, minutes: number): string {
+  const [h, m] = time.split(":").map(Number);
+  const total = h * 60 + m + minutes;
+  const nh = Math.floor(total / 60);
+  const nm = total % 60;
+  return `${nh.toString().padStart(2, "0")}:${nm.toString().padStart(2, "0")}`;
+}
+
 export function getDefaultRoutine(week: number): RoutineItem[] {
+  const wakeTime = getWakeUpTime(week);
   return [
     {
       id: "wake-up",
       name: "Wake Up",
-      time: getWakeUpTime(week),
+      time: wakeTime,
+      endTime: addMinutesToTime(wakeTime, 15),
       progressive: {
-        startTime: "07:00",
+        startTime: "06:30",
         endTime: "05:00",
-        weeks: 5,
+        weeks: 4,
       },
     },
     {
@@ -78,6 +89,7 @@ export function getDefaultRoutine(week: number): RoutineItem[] {
       id: "lights-out",
       name: "Lights Out",
       time: "21:30",
+      endTime: "21:45",
     },
   ];
 }
