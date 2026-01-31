@@ -48,7 +48,7 @@ export default function SportsSchedule() {
 
   if (loading) {
     return (
-      <div className="bg-slate-800 rounded-2xl p-6 shadow-lg">
+      <div className="bg-gradient-to-br from-slate-800 to-slate-800/80 rounded-2xl p-6 shadow-lg border border-slate-700/50">
         <h2 className="text-xl font-bold text-white mb-4">Game Schedule</h2>
         <div className="animate-pulse space-y-3">
           {[1, 2, 3].map((i) => (
@@ -60,7 +60,7 @@ export default function SportsSchedule() {
   }
 
   return (
-    <div className="bg-slate-800 rounded-2xl p-6 shadow-lg">
+    <div className="bg-gradient-to-br from-slate-800 to-slate-800/80 rounded-2xl p-6 shadow-lg border border-slate-700/50">
       <h2 className="text-xl font-bold text-white mb-4">Game Schedule</h2>
 
       <div className="flex gap-2 mb-4">

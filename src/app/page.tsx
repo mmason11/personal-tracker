@@ -8,6 +8,7 @@ import BigThree from "@/components/BigThree";
 import TodoList from "@/components/TodoList";
 import GoogleCalendar from "@/components/GoogleCalendar";
 import DayTimeline from "@/components/DayTimeline";
+import TodoSummary from "@/components/TodoSummary";
 
 type Tab = "dashboard" | "sports" | "todos" | "calendar";
 
@@ -23,25 +24,27 @@ export default function Home() {
   ];
 
   return (
-    <div className="min-h-screen bg-slate-900 pb-20 md:pb-6">
+    <div className="min-h-screen bg-[#0a0f1e] pb-20 md:pb-6 relative">
       {/* Header */}
-      <header className="sticky top-0 z-40 bg-slate-900/80 backdrop-blur-xl border-b border-slate-800">
+      <header className="sticky top-0 z-40 bg-[#0a0f1e]/80 backdrop-blur-xl border-b border-slate-800/80">
         <div className="max-w-5xl mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
             <div>
-              <h1 className="text-2xl font-bold text-white">Personal Tracker</h1>
+              <h1 className="text-2xl font-bold bg-gradient-to-r from-violet-400 via-blue-400 to-emerald-400 bg-clip-text text-transparent">
+                Personal Tracker
+              </h1>
               <p className="text-sm text-slate-400">{today}</p>
             </div>
             {/* Desktop tabs */}
-            <nav className="hidden md:flex gap-1 bg-slate-800 rounded-xl p-1">
+            <nav className="hidden md:flex gap-1 bg-slate-800/60 rounded-xl p-1 border border-slate-700/50">
               {tabs.map((tab) => (
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id)}
                   className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
                     activeTab === tab.id
-                      ? "bg-blue-600 text-white"
-                      : "text-slate-400 hover:text-white hover:bg-slate-700"
+                      ? "bg-gradient-to-r from-violet-600 to-blue-600 text-white shadow-lg shadow-violet-500/20"
+                      : "text-slate-400 hover:text-white hover:bg-slate-700/60"
                   }`}
                 >
                   {tab.label}
@@ -53,13 +56,16 @@ export default function Home() {
       </header>
 
       {/* Content */}
-      <main className="max-w-5xl mx-auto px-4 py-6">
+      <main className="max-w-5xl mx-auto px-4 py-6 relative z-10">
         {activeTab === "dashboard" && (
           <div className="space-y-6">
             <DayTimeline />
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               <RoutineTracker />
-              <BigThree />
+              <div className="space-y-6">
+                <BigThree />
+                <TodoSummary />
+              </div>
             </div>
           </div>
         )}
@@ -72,7 +78,7 @@ export default function Home() {
       </main>
 
       {/* Mobile bottom nav */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-slate-900/95 backdrop-blur-xl border-t border-slate-800 z-50">
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-[#0a0f1e]/95 backdrop-blur-xl border-t border-slate-800/80 z-50">
         <div className="flex justify-around py-2 px-2">
           {tabs.map((tab) => (
             <button
@@ -80,7 +86,7 @@ export default function Home() {
               onClick={() => setActiveTab(tab.id)}
               className={`flex flex-col items-center gap-1 px-3 py-1.5 rounded-xl transition-all ${
                 activeTab === tab.id
-                  ? "text-blue-400"
+                  ? "text-violet-400"
                   : "text-slate-500"
               }`}
             >

@@ -119,7 +119,7 @@ export default function GoogleCalendar() {
   };
 
   return (
-    <div className="bg-slate-800 rounded-2xl p-6 shadow-lg">
+    <div className="bg-gradient-to-br from-slate-800 to-slate-800/80 rounded-2xl p-6 shadow-lg border border-slate-700/50">
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-xl font-bold text-white">Google Calendar</h2>
         {connected && (
