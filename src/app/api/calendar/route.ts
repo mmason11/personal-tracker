@@ -148,6 +148,60 @@ export async function POST(request: Request) {
     }
   }
 
+  // Update a single event
+  if (body.action === "update") {
+    const { token, eventId, event } = body;
+    if (!token) {
+      return NextResponse.json({ error: "No token" }, { status: 401 });
+    }
+    try {
+      const res = await fetch(
+        `https://www.googleapis.com/calendar/v3/calendars/primary/events/${eventId}`,
+        {
+          method: "PATCH",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(event),
+        }
+      );
+      const data = await res.json();
+      if (!res.ok) {
+        return NextResponse.json({ error: data.error?.message || "Failed to update event" }, { status: res.status });
+      }
+      return NextResponse.json(data);
+    } catch (error) {
+      console.error("Update event error:", error);
+      return NextResponse.json({ error: "Failed to update event" }, { status: 500 });
+    }
+  }
+
+  // Delete a single event
+  if (body.action === "delete") {
+    const { token, eventId } = body;
+    if (!token) {
+      return NextResponse.json({ error: "No token" }, { status: 401 });
+    }
+    try {
+      const res = await fetch(
+        `https://www.googleapis.com/calendar/v3/calendars/primary/events/${eventId}`,
+        {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
+      if (res.ok || res.status === 204) {
+        return NextResponse.json({ success: true });
+      }
+      const data = await res.json().catch(() => ({}));
+      return NextResponse.json({ error: (data as Record<string, unknown>)?.message || "Failed to delete event" }, { status: res.status });
+    } catch (error) {
+      console.error("Delete event error:", error);
+      return NextResponse.json({ error: "Failed to delete event" }, { status: 500 });
+    }
+  }
+
   // Batch create events
   if (body.action === "sync") {
     const { token, events } = body;

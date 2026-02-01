@@ -284,6 +284,17 @@ export async function removeRoutineOverride(
   if (error) throw error;
 }
 
+export async function skipRoutineForDay(
+  routineId: string,
+  date: string
+): Promise<void> {
+  await setRoutineOverride(routineId, date, "skip", "skip");
+}
+
+export function isRoutineSkipped(override: RoutineOverride | undefined): boolean {
+  return override?.start === "skip" && override?.end === "skip";
+}
+
 // Profile helpers (week1Start, tokens)
 export async function getProfile(): Promise<Record<string, unknown> | null> {
   const userId = await getUserId();

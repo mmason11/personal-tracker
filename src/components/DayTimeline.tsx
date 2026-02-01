@@ -14,6 +14,8 @@ import {
   getOverrideForRoutine,
   setRoutineOverride,
   removeRoutineOverride,
+  skipRoutineForDay,
+  isRoutineSkipped,
   getGoogleTokens,
 } from "@/lib/supabase-storage";
 import EventEditor from "./EventEditor";
@@ -131,6 +133,7 @@ export default function DayTimeline() {
   const [blocks, setBlocks] = useState<TimeBlock[]>([]);
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [currentMinutes, setCurrentMinutes] = useState(getCurrentTimeMinutes());
+  const [googleToken, setGoogleToken] = useState<string | null>(null);
   const dateStr = format(selectedDate, "yyyy-MM-dd");
   const isViewingToday = isToday(selectedDate);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -166,6 +169,7 @@ export default function DayTimeline() {
     for (const item of routine) {
       if (item.endTime) {
         const override = await getOverrideForRoutine(item.id, dateStr);
+        if (isRoutineSkipped(override)) continue;
         const completed = await isCompleted(item.id, dateStr);
         timeBlocks.push({
           id: item.id,
@@ -207,6 +211,7 @@ export default function DayTimeline() {
     try {
       const { accessToken } = await getGoogleTokens();
       if (accessToken) {
+        setGoogleToken(accessToken);
         const res = await fetch(`/api/calendar?action=events&token=${accessToken}`);
         if (res.ok) {
           const gcalEvents: CalendarEvent[] = await res.json();
@@ -224,7 +229,7 @@ export default function DayTimeline() {
               start: startTime,
               end: endTime,
               type: "google",
-              editable: false,
+              editable: true,
             });
           });
         }
@@ -590,35 +595,73 @@ export default function DayTimeline() {
 
       {/* Event Editor Modal */}
       {editorState && (() => {
-        const isReadOnly = editorState.blockType !== "custom" && editorState.blockType !== "routine" && editorState.mode === "edit";
+        const bt = editorState.blockType;
+        const isGoogle = bt === "google";
+        const isReadOnly = bt !== "custom" && bt !== "routine" && !isGoogle && editorState.mode === "edit";
         return (
           <EventEditor
             mode={editorState.mode}
-            eventType={editorState.blockType === "custom" ? "custom" : editorState.blockType === "routine" ? "routine" : undefined}
+            eventType={bt === "custom" ? "custom" : bt === "routine" ? "routine" : undefined}
             readOnly={isReadOnly}
             initialData={editorState.initialData}
             onSave={async (data) => {
               if (editorState.mode === "create") {
                 await addCustomEvent({ name: data.name, date: data.date, start: data.start, end: data.end });
-              } else if (editorState.blockType === "custom") {
+              } else if (bt === "custom") {
                 await updateCustomEvent(editorState.blockId!, { name: data.name, start: data.start, end: data.end, date: data.date });
-              } else if (editorState.blockType === "routine") {
+              } else if (bt === "routine") {
                 await setRoutineOverride(editorState.blockId!, data.date, data.start, data.end);
+              } else if (isGoogle && googleToken) {
+                const datePrefix = data.date;
+                await fetch("/api/calendar", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    action: "update",
+                    token: googleToken,
+                    eventId: editorState.blockId,
+                    event: {
+                      summary: data.name,
+                      start: { dateTime: `${datePrefix}T${data.start}:00`, timeZone: "America/Chicago" },
+                      end: { dateTime: `${datePrefix}T${data.end}:00`, timeZone: "America/Chicago" },
+                    },
+                  }),
+                });
               }
               setEditorState(null);
               loadData();
             }}
             onDelete={
-              editorState.blockType === "custom"
+              bt === "custom"
                 ? async () => {
                     await removeCustomEvent(editorState.blockId!);
+                    setEditorState(null);
+                    loadData();
+                  }
+                : bt === "routine"
+                ? async () => {
+                    await skipRoutineForDay(editorState.blockId!, dateStr);
+                    setEditorState(null);
+                    loadData();
+                  }
+                : isGoogle && googleToken
+                ? async () => {
+                    await fetch("/api/calendar", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        action: "delete",
+                        token: googleToken,
+                        eventId: editorState.blockId,
+                      }),
+                    });
                     setEditorState(null);
                     loadData();
                   }
                 : undefined
             }
             onResetRoutine={
-              editorState.blockType === "routine" && editorState.mode === "edit"
+              bt === "routine" && editorState.mode === "edit"
                 ? async () => {
                     await removeRoutineOverride(editorState.blockId!, dateStr);
                     setEditorState(null);
