@@ -1,11 +1,13 @@
 import { SportsGame } from "./types";
 
 const CACHE_KEY = "sports_cache";
-const CACHE_DURATION = 6 * 60 * 60 * 1000; // 6 hours
+const CACHE_DURATION = 1 * 60 * 60 * 1000; // 1 hour
+const CACHE_VERSION = 2; // Bump to invalidate old caches
 
 interface SportsCache {
   games: SportsGame[];
   lastFetched: number;
+  version?: number;
 }
 
 function getCachedGames(): SportsGame[] | null {
@@ -13,12 +15,13 @@ function getCachedGames(): SportsGame[] | null {
   const stored = localStorage.getItem(CACHE_KEY);
   if (!stored) return null;
   const cache: SportsCache = JSON.parse(stored);
+  if ((cache.version || 0) < CACHE_VERSION) return null;
   if (Date.now() - cache.lastFetched > CACHE_DURATION) return null;
   return cache.games;
 }
 
 function setCachedGames(games: SportsGame[]): void {
-  const cache: SportsCache = { games, lastFetched: Date.now() };
+  const cache: SportsCache = { games, lastFetched: Date.now(), version: CACHE_VERSION };
   localStorage.setItem(CACHE_KEY, JSON.stringify(cache));
 }
 
