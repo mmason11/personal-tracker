@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { format, subDays } from "date-fns";
 import { createClient } from "@/lib/supabase/client";
 import { getFitbitTokens } from "@/lib/fitbit";
-import { getPelotonSession } from "@/lib/peloton";
+import { getStravaTokens } from "@/lib/strava";
 
 export type DateRange = "today" | "7days" | "30days";
 
@@ -45,32 +45,33 @@ export interface FitbitSleep {
   end_time: string | null;
 }
 
-export interface PelotonWorkout {
-  peloton_workout_id: string;
-  started_at: string;
-  discipline: string;
-  duration_seconds: number;
-  title: string;
-  instructor: string;
-  total_output: number | null;
-  avg_cadence: number | null;
-  avg_resistance: number | null;
-  avg_heart_rate: number | null;
-  max_heart_rate: number | null;
+export interface StravaActivity {
+  strava_activity_id: number;
+  name: string;
+  type: string;
+  start_date: string;
+  distance_meters: number;
+  moving_time_seconds: number;
+  elapsed_time_seconds: number;
+  total_elevation_gain: number;
+  average_speed: number;
+  max_speed: number;
+  average_watts: number | null;
+  max_watts: number | null;
+  average_heartrate: number | null;
+  max_heartrate: number | null;
   calories: number;
-  distance_miles: number | null;
-  is_pr: boolean;
 }
 
 export function useFitnessData(range: DateRange) {
   const [activity, setActivity] = useState<FitbitActivity[]>([]);
   const [heartRate, setHeartRate] = useState<FitbitHeartRate[]>([]);
   const [sleep, setSleep] = useState<FitbitSleep[]>([]);
-  const [workouts, setWorkouts] = useState<PelotonWorkout[]>([]);
+  const [stravaActivities, setStravaActivities] = useState<StravaActivity[]>([]);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [fitbitConnected, setFitbitConnected] = useState(false);
-  const [pelotonConnected, setPelotonConnected] = useState(false);
+  const [stravaConnected, setStravaConnected] = useState(false);
 
   const supabase = createClient();
 
@@ -121,16 +122,16 @@ export function useFitnessData(range: DateRange) {
       .order("date", { ascending: true });
     setSleep(sleepData || []);
 
-    // Load Peloton workouts
+    // Load Strava activities
     const thirtyDaysAgo = format(subDays(new Date(), 30), "yyyy-MM-dd");
-    const { data: workoutData } = await supabase
-      .from("peloton_workouts")
+    const { data: stravaData } = await supabase
+      .from("strava_activities")
       .select("*")
       .eq("user_id", user.id)
-      .gte("started_at", `${thirtyDaysAgo}T00:00:00`)
-      .order("started_at", { ascending: false })
+      .gte("start_date", `${thirtyDaysAgo}T00:00:00`)
+      .order("start_date", { ascending: false })
       .limit(20);
-    setWorkouts(workoutData || []);
+    setStravaActivities(stravaData || []);
 
     setLoading(false);
   }, [supabase, getDates]);
@@ -154,27 +155,28 @@ export function useFitnessData(range: DateRange) {
     setSyncing(false);
   }, [getDates, loadFromSupabase]);
 
-  const syncPeloton = useCallback(async () => {
-    const { sessionId, userId: pelotonUserId } = await getPelotonSession();
-    if (!sessionId || !pelotonUserId) return;
+  const syncStrava = useCallback(async () => {
+    const { accessToken, refreshToken, expiresAt } = await getStravaTokens();
+    if (!accessToken || !refreshToken) return;
 
     setSyncing(true);
     try {
-      const res = await fetch("/api/peloton/sync", {
+      const res = await fetch("/api/strava/sync", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          session_id: sessionId,
-          peloton_user_id: pelotonUserId,
+          access_token: accessToken,
+          refresh_token: refreshToken,
+          expires_at: expiresAt,
         }),
       });
       const result = await res.json();
-      if (result.error?.includes("Session expired")) {
-        setPelotonConnected(false);
+      if (result.error?.includes("expired") || result.error?.includes("reconnect")) {
+        setStravaConnected(false);
       }
       await loadFromSupabase();
     } catch (err) {
-      console.error("Peloton sync error:", err);
+      console.error("Strava sync error:", err);
     }
     setSyncing(false);
   }, [loadFromSupabase]);
@@ -184,14 +186,14 @@ export function useFitnessData(range: DateRange) {
       const { accessToken } = await getFitbitTokens();
       setFitbitConnected(!!accessToken);
 
-      const { sessionId } = await getPelotonSession();
-      setPelotonConnected(!!sessionId);
+      const { accessToken: stravaToken } = await getStravaTokens();
+      setStravaConnected(!!stravaToken);
 
       await loadFromSupabase();
 
       // Auto-sync if connected
       if (accessToken) syncFitbit();
-      if (sessionId) syncPeloton();
+      if (stravaToken) syncStrava();
     }
     init();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -201,15 +203,15 @@ export function useFitnessData(range: DateRange) {
     activity,
     heartRate,
     sleep,
-    workouts,
+    stravaActivities,
     loading,
     syncing,
     fitbitConnected,
-    pelotonConnected,
+    stravaConnected,
     setFitbitConnected,
-    setPelotonConnected,
+    setStravaConnected,
     syncFitbit,
-    syncPeloton,
+    syncStrava,
     refresh: loadFromSupabase,
   };
 }

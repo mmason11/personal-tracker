@@ -66,8 +66,8 @@ function generateSuggestion(game: SportsGame, item: RoutineItem): string {
   }
 
   // For workout specifically, suggest morning
-  if (item.id === "peloton") {
-    return `Move Peloton workout to the morning (before the ${teamName} game)`;
+  if (item.id === "workout") {
+    return `Move workout to the morning (before the ${teamName} game)`;
   }
 
   return `Adjust "${item.name}" around the ${teamName} game (${game.time}-${game.endTime})`;

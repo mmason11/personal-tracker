@@ -4,11 +4,11 @@ import { useState } from "react";
 import { useFitnessData, DateRange } from "@/hooks/useFitnessData";
 import DateRangePicker from "./metrics/DateRangePicker";
 import FitbitConnect from "./metrics/FitbitConnect";
-import PelotonConnect from "./metrics/PelotonConnect";
+import StravaConnect from "./metrics/StravaConnect";
 import ActivitySummary from "./metrics/ActivitySummary";
 import HeartRateCard from "./metrics/HeartRateCard";
 import SleepCard from "./metrics/SleepCard";
-import PelotonCard from "./metrics/PelotonCard";
+import StravaCard from "./metrics/StravaCard";
 import TrendChart from "./metrics/TrendChart";
 
 export default function MetricsPage() {
@@ -17,15 +17,15 @@ export default function MetricsPage() {
     activity,
     heartRate,
     sleep,
-    workouts,
+    stravaActivities,
     loading,
     syncing,
     fitbitConnected,
-    pelotonConnected,
+    stravaConnected,
     setFitbitConnected,
-    setPelotonConnected,
+    setStravaConnected,
     syncFitbit,
-    syncPeloton,
+    syncStrava,
   } = useFitnessData(range);
 
   const stepsTrend = activity.map((d) => ({
@@ -61,10 +61,10 @@ export default function MetricsPage() {
           onSync={syncFitbit}
           syncing={syncing}
         />
-        <PelotonConnect
-          connected={pelotonConnected}
-          onConnectionChange={setPelotonConnected}
-          onSync={syncPeloton}
+        <StravaConnect
+          connected={stravaConnected}
+          onConnectionChange={setStravaConnected}
+          onSync={syncStrava}
           syncing={syncing}
         />
       </div>
@@ -85,7 +85,7 @@ export default function MetricsPage() {
             <ActivitySummary data={activity} />
             <HeartRateCard data={heartRate} />
             <SleepCard data={sleep} />
-            <PelotonCard data={workouts} />
+            <StravaCard data={stravaActivities} />
           </div>
 
           {/* Trend charts (only for 7+ days) */}

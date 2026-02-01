@@ -11,8 +11,10 @@ CREATE TABLE IF NOT EXISTS profiles (
   fitbit_access_token TEXT,
   fitbit_refresh_token TEXT,
   fitbit_user_id TEXT,
-  peloton_session_id TEXT,
-  peloton_user_id TEXT,
+  strava_access_token TEXT,
+  strava_refresh_token TEXT,
+  strava_token_expires_at BIGINT,
+  strava_athlete_id TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -179,31 +181,32 @@ CREATE TABLE IF NOT EXISTS fitbit_sleep (
 ALTER TABLE fitbit_sleep ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Users can manage own sleep" ON fitbit_sleep FOR ALL USING (auth.uid() = user_id);
 
--- 11. Peloton Workouts
-CREATE TABLE IF NOT EXISTS peloton_workouts (
+-- 11. Strava Activities
+CREATE TABLE IF NOT EXISTS strava_activities (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  peloton_workout_id TEXT NOT NULL,
-  started_at TIMESTAMPTZ,
-  discipline TEXT,
-  duration_seconds INTEGER DEFAULT 0,
-  title TEXT,
-  instructor TEXT,
-  total_output INTEGER,
-  avg_cadence REAL,
-  avg_resistance REAL,
-  avg_speed REAL,
-  avg_heart_rate REAL,
-  max_heart_rate REAL,
+  strava_activity_id BIGINT NOT NULL,
+  name TEXT,
+  type TEXT,
+  start_date TIMESTAMPTZ,
+  distance_meters REAL DEFAULT 0,
+  moving_time_seconds INTEGER DEFAULT 0,
+  elapsed_time_seconds INTEGER DEFAULT 0,
+  total_elevation_gain REAL DEFAULT 0,
+  average_speed REAL DEFAULT 0,
+  max_speed REAL DEFAULT 0,
+  average_watts REAL,
+  max_watts REAL,
+  average_heartrate REAL,
+  max_heartrate REAL,
   calories INTEGER DEFAULT 0,
-  distance_miles REAL,
-  is_pr BOOLEAN DEFAULT FALSE,
+  gear_id TEXT,
   fetched_at TIMESTAMPTZ DEFAULT NOW(),
-  UNIQUE(user_id, peloton_workout_id)
+  UNIQUE(user_id, strava_activity_id)
 );
 
-ALTER TABLE peloton_workouts ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Users can manage own workouts" ON peloton_workouts FOR ALL USING (auth.uid() = user_id);
+ALTER TABLE strava_activities ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Users can manage own activities" ON strava_activities FOR ALL USING (auth.uid() = user_id);
 
 -- Create indexes for common queries
 CREATE INDEX IF NOT EXISTS idx_big_three_user_week ON big_three_goals(user_id, week_start);
@@ -214,4 +217,4 @@ CREATE INDEX IF NOT EXISTS idx_routine_completions_user ON routine_completions(u
 CREATE INDEX IF NOT EXISTS idx_fitbit_activity_user_date ON fitbit_daily_activity(user_id, date);
 CREATE INDEX IF NOT EXISTS idx_fitbit_hr_user_date ON fitbit_heart_rate(user_id, date);
 CREATE INDEX IF NOT EXISTS idx_fitbit_sleep_user_date ON fitbit_sleep(user_id, date);
-CREATE INDEX IF NOT EXISTS idx_peloton_user ON peloton_workouts(user_id, started_at);
+CREATE INDEX IF NOT EXISTS idx_strava_user ON strava_activities(user_id, start_date);

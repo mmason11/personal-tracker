@@ -70,8 +70,8 @@ export function getDefaultRoutine(week: number): RoutineItem[] {
       weekdaysOnly: true,
     },
     {
-      id: "peloton",
-      name: "Peloton Workout",
+      id: "workout",
+      name: "Workout",
       time: "17:30",
       endTime: "18:15",
     },
