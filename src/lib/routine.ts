@@ -1,22 +1,23 @@
 import { RoutineItem } from "./types";
+import { getWeek1Start as getWeek1StartFromSupabase } from "./supabase-storage";
 
-// Week 1 start date - set to the Monday of the week the app is first used
-function getWeek1Start(): string {
-  if (typeof window === "undefined") return new Date().toISOString();
-  const stored = localStorage.getItem("week1Start");
-  if (stored) return stored;
-  const now = new Date();
-  const day = now.getDay();
-  const diff = now.getDate() - day + (day === 0 ? -6 : 1);
-  const monday = new Date(now.setDate(diff));
-  monday.setHours(0, 0, 0, 0);
-  const iso = monday.toISOString();
-  localStorage.setItem("week1Start", iso);
-  return iso;
+// Week 1 start date - now stored in Supabase profile
+export async function getWeek1Start(): Promise<string> {
+  try {
+    return await getWeek1StartFromSupabase();
+  } catch {
+    // Fallback for unauthenticated or error states
+    const now = new Date();
+    const day = now.getDay();
+    const diff = now.getDate() - day + (day === 0 ? -6 : 1);
+    const monday = new Date(now.setDate(diff));
+    monday.setHours(0, 0, 0, 0);
+    return monday.toISOString();
+  }
 }
 
-export function getCurrentWeek(): number {
-  const start = new Date(getWeek1Start());
+export async function getCurrentWeek(): Promise<number> {
+  const start = new Date(await getWeek1Start());
   const now = new Date();
   const diffMs = now.getTime() - start.getTime();
   const diffWeeks = Math.floor(diffMs / (7 * 24 * 60 * 60 * 1000));
@@ -24,7 +25,7 @@ export function getCurrentWeek(): number {
 }
 
 export function getWakeUpTime(week: number): string {
-  // Week 1: 6:30 AM → 30 min earlier each week → caps at 5:00 AM
+  // Week 1: 6:30 AM -> 30 min earlier each week -> caps at 5:00 AM
   const totalMinutes = 6 * 60 + 30 - (Math.min(week, 4) - 1) * 30;
   const clamped = Math.max(totalMinutes, 5 * 60); // never earlier than 5:00 AM
   const h = Math.floor(clamped / 60);

@@ -8,7 +8,7 @@ import {
   toggleBigThree,
   removeBigThree,
   getCurrentWeekStart,
-} from "@/lib/storage";
+} from "@/lib/supabase-storage";
 
 export default function BigThree() {
   const [goals, setGoals] = useState<BigThreeGoal[]>([]);
@@ -16,22 +16,23 @@ export default function BigThree() {
   const [isAdding, setIsAdding] = useState(false);
 
   useEffect(() => {
-    setGoals(getBigThree());
+    getBigThree().then(setGoals).catch(console.error);
   }, []);
 
-  const handleAdd = () => {
+  const handleAdd = async () => {
     if (!newGoal.trim() || goals.length >= 3) return;
-    setGoals(addBigThreeGoal(newGoal.trim()));
+    const updated = await addBigThreeGoal(newGoal.trim());
+    setGoals(updated);
     setNewGoal("");
     setIsAdding(false);
   };
 
-  const handleToggle = (id: string) => {
-    setGoals(toggleBigThree(id));
+  const handleToggle = async (id: string) => {
+    setGoals(await toggleBigThree(id));
   };
 
-  const handleRemove = (id: string) => {
-    setGoals(removeBigThree(id));
+  const handleRemove = async (id: string) => {
+    setGoals(await removeBigThree(id));
   };
 
   const weekStart = getCurrentWeekStart();

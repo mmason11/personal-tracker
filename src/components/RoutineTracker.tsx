@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { format } from "date-fns";
 import { RoutineItem } from "@/lib/types";
 import { getRoutineForDate, getCurrentWeek, getWakeUpTime } from "@/lib/routine";
-import { toggleCompletion, isCompleted, calculateStreak } from "@/lib/streaks";
+import { toggleCompletion, isCompleted, calculateStreak } from "@/lib/supabase-streaks";
 import { formatTime12h } from "@/lib/timeFormat";
 
 export default function RoutineTracker() {
@@ -15,25 +15,29 @@ export default function RoutineTracker() {
   const today = format(new Date(), "yyyy-MM-dd");
 
   useEffect(() => {
-    const w = getCurrentWeek();
-    setWeek(w);
-    const items = getRoutineForDate(new Date(), w);
-    setRoutine(items);
+    async function load() {
+      const w = await getCurrentWeek();
+      setWeek(w);
+      const items = getRoutineForDate(new Date(), w);
+      setRoutine(items);
 
-    const comps: Record<string, boolean> = {};
-    const stks: Record<string, number> = {};
-    items.forEach((item) => {
-      comps[item.id] = isCompleted(item.id, today);
-      stks[item.id] = calculateStreak(item.id).current;
-    });
-    setCompletions(comps);
-    setStreaks(stks);
+      const comps: Record<string, boolean> = {};
+      const stks: Record<string, number> = {};
+      for (const item of items) {
+        comps[item.id] = await isCompleted(item.id, today);
+        const s = await calculateStreak(item.id);
+        stks[item.id] = s.current;
+      }
+      setCompletions(comps);
+      setStreaks(stks);
+    }
+    load().catch(console.error);
   }, [today]);
 
-  const handleToggle = (routineId: string) => {
-    toggleCompletion(routineId, today);
+  const handleToggle = async (routineId: string) => {
+    await toggleCompletion(routineId, today);
     setCompletions((prev) => ({ ...prev, [routineId]: !prev[routineId] }));
-    const streak = calculateStreak(routineId);
+    const streak = await calculateStreak(routineId);
     setStreaks((prev) => ({ ...prev, [routineId]: streak.current }));
   };
 

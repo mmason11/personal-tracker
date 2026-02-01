@@ -3,17 +3,17 @@
 import { useState, useEffect } from "react";
 import { format } from "date-fns";
 import { TodoItem } from "@/lib/types";
-import { getTodos, toggleTodo } from "@/lib/storage";
+import { getTodos, toggleTodo } from "@/lib/supabase-storage";
 
 export default function TodoSummary() {
   const [todos, setTodos] = useState<TodoItem[]>([]);
 
   useEffect(() => {
-    setTodos(getTodos());
+    getTodos().then(setTodos).catch(console.error);
   }, []);
 
-  const handleToggle = (id: string) => {
-    setTodos(toggleTodo(id));
+  const handleToggle = async (id: string) => {
+    setTodos(await toggleTodo(id));
   };
 
   const activeTodos = todos

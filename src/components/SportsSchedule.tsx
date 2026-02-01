@@ -20,7 +20,7 @@ export default function SportsSchedule() {
       const upcoming = getUpcomingGames(allGames, 30);
       setGames(upcoming);
 
-      const week = getCurrentWeek();
+      const week = await getCurrentWeek();
       const allConflicts: Conflict[] = [];
       const checkedDates = new Set<string>();
 

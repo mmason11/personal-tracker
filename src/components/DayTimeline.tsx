@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { format, addDays, subDays, isToday } from "date-fns";
 import { getRoutineForDate, getCurrentWeek } from "@/lib/routine";
 import { fetchSportsSchedules, getGamesForDate } from "@/lib/sports";
-import { isCompleted } from "@/lib/streaks";
+import { isCompleted } from "@/lib/supabase-streaks";
 import { formatTime12h } from "@/lib/timeFormat";
 import {
   getCustomEventsForDate,
@@ -14,7 +14,8 @@ import {
   getOverrideForRoutine,
   setRoutineOverride,
   removeRoutineOverride,
-} from "@/lib/storage";
+  getGoogleTokens,
+} from "@/lib/supabase-storage";
 import EventEditor from "./EventEditor";
 
 import { CalendarEvent } from "@/lib/types";
@@ -79,27 +80,28 @@ export default function DayTimeline() {
   } | null>(null);
 
   const loadData = useCallback(async () => {
-    const week = getCurrentWeek();
+    const week = await getCurrentWeek();
     const routine = getRoutineForDate(selectedDate, week);
     const allGames = await fetchSportsSchedules();
     const dayGames = getGamesForDate(allGames, dateStr);
 
     const timeBlocks: TimeBlock[] = [];
 
-    routine.forEach((item) => {
+    for (const item of routine) {
       if (item.endTime) {
-        const override = getOverrideForRoutine(item.id, dateStr);
+        const override = await getOverrideForRoutine(item.id, dateStr);
+        const completed = await isCompleted(item.id, dateStr);
         timeBlocks.push({
           id: item.id,
           name: item.name,
           start: override ? override.start : item.time,
           end: override ? override.end : item.endTime,
           type: "routine",
-          completed: isCompleted(item.id, dateStr),
+          completed,
           editable: true,
         });
       }
-    });
+    }
 
     dayGames.forEach((game) => {
       timeBlocks.push({
@@ -113,7 +115,7 @@ export default function DayTimeline() {
     });
 
     // Custom events
-    const customEvents = getCustomEventsForDate(dateStr);
+    const customEvents = await getCustomEventsForDate(dateStr);
     customEvents.forEach((evt) => {
       timeBlocks.push({
         id: evt.id,
@@ -126,10 +128,10 @@ export default function DayTimeline() {
     });
 
     // Google Calendar events
-    const token = localStorage.getItem("google_access_token");
-    if (token) {
-      try {
-        const res = await fetch(`/api/calendar?action=events&token=${token}`);
+    try {
+      const { accessToken } = await getGoogleTokens();
+      if (accessToken) {
+        const res = await fetch(`/api/calendar?action=events&token=${accessToken}`);
         if (res.ok) {
           const gcalEvents: CalendarEvent[] = await res.json();
           gcalEvents.forEach((evt) => {
@@ -150,9 +152,9 @@ export default function DayTimeline() {
             });
           });
         }
-      } catch {
-        // Ignore calendar fetch errors
       }
+    } catch {
+      // Ignore calendar fetch errors
     }
 
     timeBlocks.sort((a, b) => timeToMinutes(a.start) - timeToMinutes(b.start));
@@ -229,7 +231,7 @@ export default function DayTimeline() {
     [dragState]
   );
 
-  const handlePointerUp = useCallback(() => {
+  const handlePointerUp = useCallback(async () => {
     if (!dragState) return;
 
     if (dragState.hasMoved) {
@@ -238,9 +240,9 @@ export default function DayTimeline() {
       const block = blocks.find((b) => b.id === dragState.blockId);
       if (block) {
         if (block.type === "custom") {
-          updateCustomEvent(dragState.blockId, { start: newStart, end: newEnd });
+          await updateCustomEvent(dragState.blockId, { start: newStart, end: newEnd });
         } else if (block.type === "routine") {
-          setRoutineOverride(dragState.blockId, dateStr, newStart, newEnd);
+          await setRoutineOverride(dragState.blockId, dateStr, newStart, newEnd);
         }
         loadData();
       }
@@ -267,7 +269,6 @@ export default function DayTimeline() {
   const handleTimelineClick = (e: React.MouseEvent) => {
     if (dragState?.hasMoved) return;
     const target = e.target as HTMLElement;
-    // Only trigger on the container itself or hour marker lines
     if (target !== containerRef.current && !target.dataset.timelineBackground) return;
     const rect = containerRef.current!.getBoundingClientRect();
     const clickY = e.clientY - rect.top;
@@ -508,21 +509,21 @@ export default function DayTimeline() {
           mode={editorState.mode}
           eventType={editorState.blockType}
           initialData={editorState.initialData}
-          onSave={(data) => {
+          onSave={async (data) => {
             if (editorState.mode === "create") {
-              addCustomEvent({ name: data.name, date: data.date, start: data.start, end: data.end });
+              await addCustomEvent({ name: data.name, date: data.date, start: data.start, end: data.end });
             } else if (editorState.blockType === "custom") {
-              updateCustomEvent(editorState.blockId!, { name: data.name, start: data.start, end: data.end, date: data.date });
+              await updateCustomEvent(editorState.blockId!, { name: data.name, start: data.start, end: data.end, date: data.date });
             } else if (editorState.blockType === "routine") {
-              setRoutineOverride(editorState.blockId!, data.date, data.start, data.end);
+              await setRoutineOverride(editorState.blockId!, data.date, data.start, data.end);
             }
             setEditorState(null);
             loadData();
           }}
           onDelete={
             editorState.blockType === "custom"
-              ? () => {
-                  removeCustomEvent(editorState.blockId!);
+              ? async () => {
+                  await removeCustomEvent(editorState.blockId!);
                   setEditorState(null);
                   loadData();
                 }
@@ -530,8 +531,8 @@ export default function DayTimeline() {
           }
           onResetRoutine={
             editorState.blockType === "routine" && editorState.mode === "edit"
-              ? () => {
-                  removeRoutineOverride(editorState.blockId!, dateStr);
+              ? async () => {
+                  await removeRoutineOverride(editorState.blockId!, dateStr);
                   setEditorState(null);
                   loadData();
                 }

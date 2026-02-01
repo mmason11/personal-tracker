@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { format } from "date-fns";
 import { TodoItem } from "@/lib/types";
-import { getTodos, addTodo, toggleTodo, removeTodo } from "@/lib/storage";
+import { getTodos, addTodo, toggleTodo, removeTodo } from "@/lib/supabase-storage";
 
 export default function TodoList() {
   const [todos, setTodos] = useState<TodoItem[]>([]);
@@ -13,29 +13,28 @@ export default function TodoList() {
   const [showCompleted, setShowCompleted] = useState(false);
 
   useEffect(() => {
-    setTodos(getTodos());
+    getTodos().then(setTodos).catch(console.error);
   }, []);
 
-  const handleAdd = () => {
+  const handleAdd = async () => {
     if (!newTodo.trim()) return;
-    setTodos(addTodo(newTodo.trim(), priority, dueDate || undefined));
+    setTodos(await addTodo(newTodo.trim(), priority, dueDate || undefined));
     setNewTodo("");
     setPriority("medium");
     setDueDate("");
   };
 
-  const handleToggle = (id: string) => {
-    setTodos(toggleTodo(id));
+  const handleToggle = async (id: string) => {
+    setTodos(await toggleTodo(id));
   };
 
-  const handleRemove = (id: string) => {
-    setTodos(removeTodo(id));
+  const handleRemove = async (id: string) => {
+    setTodos(await removeTodo(id));
   };
 
   const activeTodos = todos
     .filter((t) => !t.completed)
     .sort((a, b) => {
-      // Sort by due date first (no date = last), then priority
       const priorityOrder = { high: 0, medium: 1, low: 2 };
       if (a.dueDate && b.dueDate) {
         const dateDiff = a.dueDate.localeCompare(b.dueDate);

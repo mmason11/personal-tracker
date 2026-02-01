@@ -11,7 +11,10 @@ import {
   addCustomEvent,
   updateCustomEvent,
   removeCustomEvent,
-} from "@/lib/storage";
+  getGoogleTokens,
+  saveGoogleTokens,
+  clearGoogleTokens,
+} from "@/lib/supabase-storage";
 import EventEditor from "./EventEditor";
 
 interface CalendarDisplayEvent extends CalendarEvent {
@@ -54,13 +57,12 @@ export default function GoogleCalendar() {
   const triggerRefresh = () => setRefreshKey((k) => k + 1);
 
   const getValidToken = useCallback(async (): Promise<string | null> => {
-    const token = localStorage.getItem("google_access_token");
-    if (!token) return null;
+    const { accessToken, refreshToken } = await getGoogleTokens();
+    if (!accessToken) return null;
 
-    const testRes = await fetch(`/api/calendar?action=events&token=${token}`);
-    if (testRes.ok) return token;
+    const testRes = await fetch(`/api/calendar?action=events&token=${accessToken}`);
+    if (testRes.ok) return accessToken;
 
-    const refreshToken = localStorage.getItem("google_refresh_token");
     if (!refreshToken) return null;
 
     const refreshRes = await fetch("/api/calendar", {
@@ -70,7 +72,7 @@ export default function GoogleCalendar() {
     });
     const refreshData = await refreshRes.json();
     if (refreshData.access_token) {
-      localStorage.setItem("google_access_token", refreshData.access_token);
+      await saveGoogleTokens(refreshData.access_token);
       return refreshData.access_token;
     }
     return null;
@@ -111,10 +113,13 @@ export default function GoogleCalendar() {
   );
 
   useEffect(() => {
-    const token = localStorage.getItem("google_access_token");
-    if (token) {
-      fetchEvents(token);
+    async function init() {
+      const { accessToken } = await getGoogleTokens();
+      if (accessToken) {
+        fetchEvents(accessToken);
+      }
     }
+    init();
 
     const handleMessage = async (event: MessageEvent) => {
       if (event.data?.type === "google-auth" && event.data.code) {
@@ -125,10 +130,7 @@ export default function GoogleCalendar() {
         });
         const data = await res.json();
         if (data.access_token) {
-          localStorage.setItem("google_access_token", data.access_token);
-          if (data.refresh_token) {
-            localStorage.setItem("google_refresh_token", data.refresh_token);
-          }
+          await saveGoogleTokens(data.access_token, data.refresh_token);
           fetchEvents(data.access_token);
         }
       }
@@ -146,9 +148,8 @@ export default function GoogleCalendar() {
     }
   };
 
-  const handleDisconnect = () => {
-    localStorage.removeItem("google_access_token");
-    localStorage.removeItem("google_refresh_token");
+  const handleDisconnect = async () => {
+    await clearGoogleTokens();
     setConnected(false);
     setEvents([]);
   };
@@ -164,7 +165,7 @@ export default function GoogleCalendar() {
       return;
     }
 
-    const week = getCurrentWeek();
+    const week = await getCurrentWeek();
     const gcalEvents: Array<{
       summary: string;
       start: { dateTime: string; timeZone: string };
@@ -242,22 +243,56 @@ export default function GoogleCalendar() {
   const getEventsForDay = (date: Date): CalendarDisplayEvent[] => {
     const dateStr = format(date, "yyyy-MM-dd");
 
-    // Google calendar events
     const googleEvents: CalendarDisplayEvent[] = events
       .filter((e) => e.start.startsWith(dateStr))
       .map((e) => ({ ...e, editable: false }));
 
-    // Custom events from localStorage
-    const customEvents: CalendarDisplayEvent[] = getCustomEventsForDate(dateStr).map((ce) => ({
-      id: `custom-${ce.id}`,
-      customEventId: ce.id,
-      summary: ce.name,
-      start: `${ce.date}T${ce.start}:00`,
-      end: `${ce.date}T${ce.end}:00`,
-      source: "manual" as const,
-      editable: true,
-    }));
+    // We need to load custom events async, but this is called synchronously in render.
+    // Use a state-based approach with refreshKey to trigger re-renders.
+    let customEventsFromState: CalendarDisplayEvent[] = [];
+    try {
+      // This won't work synchronously - we'll handle this via useEffect below
+      customEventsFromState = [];
+    } catch {
+      // ignore
+    }
 
+    return [...googleEvents, ...customEventsFromState].sort((a, b) =>
+      a.start.localeCompare(b.start)
+    );
+  };
+
+  // Load custom events for all days in the week
+  const [weekCustomEvents, setWeekCustomEvents] = useState<Record<string, CalendarDisplayEvent[]>>({});
+
+  useEffect(() => {
+    async function loadCustomEvents() {
+      const result: Record<string, CalendarDisplayEvent[]> = {};
+      for (const day of weekDays) {
+        const dateStr = format(day, "yyyy-MM-dd");
+        const customEvents = await getCustomEventsForDate(dateStr);
+        result[dateStr] = customEvents.map((ce) => ({
+          id: `custom-${ce.id}`,
+          customEventId: ce.id,
+          summary: ce.name,
+          start: `${ce.date}T${ce.start}:00`,
+          end: `${ce.date}T${ce.end}:00`,
+          source: "manual" as const,
+          editable: true,
+        }));
+      }
+      setWeekCustomEvents(result);
+    }
+    loadCustomEvents();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [weekStart, refreshKey, events]);
+
+  const getEventsForDayMerged = (date: Date): CalendarDisplayEvent[] => {
+    const dateStr = format(date, "yyyy-MM-dd");
+    const googleEvents: CalendarDisplayEvent[] = events
+      .filter((e) => e.start.startsWith(dateStr))
+      .map((e) => ({ ...e, editable: false }));
+    const customEvents = weekCustomEvents[dateStr] || [];
     return [...googleEvents, ...customEvents].sort((a, b) =>
       a.start.localeCompare(b.start)
     );
@@ -320,7 +355,6 @@ export default function GoogleCalendar() {
   const handleDragPointerMove = useCallback(
     (e: PointerEvent) => {
       if (!dragCalState) return;
-      // Determine which column the pointer is over
       for (let i = 0; i < dayColumnRefs.current.length; i++) {
         const col = dayColumnRefs.current[i];
         if (!col) continue;
@@ -338,12 +372,12 @@ export default function GoogleCalendar() {
     [dragCalState]
   );
 
-  const handleDragPointerUp = useCallback(() => {
+  const handleDragPointerUp = useCallback(async () => {
     if (!dragCalState) return;
     if (dragCalState.hasMoved && dragCalState.currentColIdx !== null) {
       const newDate = format(weekDays[dragCalState.currentColIdx], "yyyy-MM-dd");
       if (newDate !== dragCalState.sourceDate) {
-        updateCustomEvent(dragCalState.eventId, { date: newDate });
+        await updateCustomEvent(dragCalState.eventId, { date: newDate });
         triggerRefresh();
       }
     }
@@ -386,6 +420,8 @@ export default function GoogleCalendar() {
   // Force re-read of custom events
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const _refresh = refreshKey;
+  // Suppress unused getEventsForDay
+  void getEventsForDay;
 
   return (
     <div className="space-y-4">
@@ -514,43 +550,19 @@ export default function GoogleCalendar() {
                 onClick={goToPrevWeek}
                 className="p-2 rounded-lg bg-slate-700/60 hover:bg-slate-600 text-slate-300 hover:text-white transition-all"
               >
-                <svg
-                  className="w-4 h-4"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                  strokeWidth={2.5}
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M15 19l-7-7 7-7"
-                  />
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
                 </svg>
               </button>
-              <button
-                onClick={goToThisWeek}
-                className="text-sm font-semibold text-white"
-              >
-                {format(weekDays[0], "MMM d")} &ndash;{" "}
-                {format(weekDays[6], "MMM d, yyyy")}
+              <button onClick={goToThisWeek} className="text-sm font-semibold text-white">
+                {format(weekDays[0], "MMM d")} &ndash; {format(weekDays[6], "MMM d, yyyy")}
               </button>
               <button
                 onClick={goToNextWeek}
                 className="p-2 rounded-lg bg-slate-700/60 hover:bg-slate-600 text-slate-300 hover:text-white transition-all"
               >
-                <svg
-                  className="w-4 h-4"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                  strokeWidth={2.5}
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M9 5l7 7-7 7"
-                  />
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
                 </svg>
               </button>
             </div>
@@ -559,7 +571,7 @@ export default function GoogleCalendar() {
           {/* Desktop: 7-column grid */}
           <div className="hidden md:grid grid-cols-7 gap-2 select-none">
             {weekDays.map((day, dayIdx) => {
-              const dayEvents = getEventsForDay(day);
+              const dayEvents = getEventsForDayMerged(day);
               const today = isToday(day);
               const isDropTarget = dragCalState?.currentColIdx === dayIdx && dragCalState?.hasMoved;
               return (
@@ -575,21 +587,14 @@ export default function GoogleCalendar() {
                   }`}
                   onClick={(e) => {
                     if (dragCalState?.hasMoved) return;
-                    // Only if clicking the column itself (not an event card)
                     if (e.target === e.currentTarget || (e.target as HTMLElement).dataset.dayEmpty) {
                       handleDayClick(day);
                     }
                   }}
                 >
                   <div className="text-center mb-3">
-                    <p className="text-xs text-slate-500 uppercase font-medium">
-                      {format(day, "EEE")}
-                    </p>
-                    <p
-                      className={`text-lg font-bold ${
-                        today ? "text-violet-400" : "text-white"
-                      }`}
-                    >
+                    <p className="text-xs text-slate-500 uppercase font-medium">{format(day, "EEE")}</p>
+                    <p className={`text-lg font-bold ${today ? "text-violet-400" : "text-white"}`}>
                       {format(day, "d")}
                     </p>
                   </div>
@@ -618,17 +623,12 @@ export default function GoogleCalendar() {
                             handleEventClick(evt);
                           }}
                         >
-                          <p className={`font-medium truncate ${style.text}`}>
-                            {cleanSummary(evt.summary)}
-                          </p>
-                          <p className={`${style.time} text-[10px]`}>
-                            {formatEventTime(evt.start)}
-                          </p>
+                          <p className={`font-medium truncate ${style.text}`}>{cleanSummary(evt.summary)}</p>
+                          <p className={`${style.time} text-[10px]`}>{formatEventTime(evt.start)}</p>
                         </div>
                       );
                     })}
                   </div>
-                  {/* Add button at bottom of day */}
                   {dayEvents.length > 0 && (
                     <button
                       onClick={(e) => {
@@ -648,7 +648,7 @@ export default function GoogleCalendar() {
           {/* Mobile: stacked days */}
           <div className="md:hidden space-y-3">
             {weekDays.map((day) => {
-              const dayEvents = getEventsForDay(day);
+              const dayEvents = getEventsForDayMerged(day);
               const today = isToday(day);
               if (dayEvents.length === 0 && !today && !isSameDay(day, weekDays[0])) return null;
               return (
@@ -671,12 +671,8 @@ export default function GoogleCalendar() {
                       {format(day, "d")}
                     </div>
                     <div>
-                      <p className="text-white font-semibold text-sm">
-                        {format(day, "EEEE")}
-                      </p>
-                      <p className="text-slate-400 text-xs">
-                        {format(day, "MMMM d")}
-                      </p>
+                      <p className="text-white font-semibold text-sm">{format(day, "EEEE")}</p>
+                      <p className="text-slate-400 text-xs">{format(day, "MMMM d")}</p>
                     </div>
                     {today && (
                       <span className="ml-auto text-xs font-bold text-violet-400 bg-violet-500/15 px-2 py-0.5 rounded-full">
@@ -706,9 +702,7 @@ export default function GoogleCalendar() {
                             <span className={`text-xs font-mono flex-shrink-0 ${style.time}`}>
                               {formatEventTime(evt.start)}
                             </span>
-                            <p
-                              className={`font-medium text-sm truncate ${style.text}`}
-                            >
+                            <p className={`font-medium text-sm truncate ${style.text}`}>
                               {cleanSummary(evt.summary)}
                             </p>
                           </div>
@@ -735,16 +729,16 @@ export default function GoogleCalendar() {
           mode={editorState.mode}
           eventType={editorState.eventType}
           initialData={editorState.initialData}
-          onSave={(data) => {
+          onSave={async (data) => {
             if (editorState.mode === "create") {
-              addCustomEvent({
+              await addCustomEvent({
                 name: data.name,
                 date: data.date,
                 start: data.start,
                 end: data.end,
               });
             } else if (editorState.eventId) {
-              updateCustomEvent(editorState.eventId, {
+              await updateCustomEvent(editorState.eventId, {
                 name: data.name,
                 start: data.start,
                 end: data.end,
@@ -756,8 +750,8 @@ export default function GoogleCalendar() {
           }}
           onDelete={
             editorState.eventId
-              ? () => {
-                  removeCustomEvent(editorState.eventId!);
+              ? async () => {
+                  await removeCustomEvent(editorState.eventId!);
                   setEditorState(null);
                   triggerRefresh();
                 }
