@@ -1,129 +1,115 @@
 import { NextResponse } from "next/server";
 import { SportsGame } from "@/lib/types";
 
+interface ESPNFeedEntry {
+  id: string;
+  date: string;
+  opponentName: string;
+  opponentLocation: string;
+  opponentNickname: string;
+  homeAway: "h" | "a";
+  statusName: string;
+  leagueName?: string;
+  neutralSite?: boolean;
+  shortName?: string;
+}
+
+interface ESPNScheduleResponse {
+  columns?: Array<{
+    items?: Array<{
+      feed?: ESPNFeedEntry[];
+    }>;
+  }>;
+}
+
 async function fetchManCitySchedule(): Promise<SportsGame[]> {
   try {
-    // Use football-data.org free API for Man City fixtures
     const res = await fetch(
-      "https://api.football-data.org/v4/teams/65/matches?status=SCHEDULED&limit=20",
-      {
-        headers: {
-          "X-Auth-Token": process.env.FOOTBALL_DATA_API_KEY || "",
-        },
-        next: { revalidate: 21600 }, // 6 hours
-      }
+      "https://cdn.espn.com/core/soccer/team/_/id/382/schedule?xhr=1&render=false",
+      { next: { revalidate: 21600 } }
     );
 
     if (!res.ok) {
-      console.error("Football API error:", res.status);
-      return getManCityFallback();
+      console.error("ESPN Man City API error:", res.status);
+      return [];
     }
 
-    const data = await res.json();
-    return (data.matches || []).map(
-      (match: {
-        id: number;
-        homeTeam: { name: string; id: number };
-        awayTeam: { name: string; id: number };
-        utcDate: string;
-        venue?: string;
-        competition?: { name: string };
-      }) => {
-        const isHome = match.homeTeam.id === 65;
-        const opponent = isHome ? match.awayTeam.name : match.homeTeam.name;
-        const gameDate = new Date(match.utcDate);
+    const data: ESPNScheduleResponse = await res.json();
+    const feed = data?.columns?.[0]?.items?.[0]?.feed;
+    if (!feed) return [];
+
+    return feed
+      .filter((entry) => entry.statusName === "STATUS_SCHEDULED")
+      .map((entry) => {
+        const gameDate = new Date(entry.date);
         const hours = gameDate.getHours().toString().padStart(2, "0");
         const mins = gameDate.getMinutes().toString().padStart(2, "0");
         const endDate = new Date(gameDate.getTime() + 2 * 60 * 60 * 1000);
         const endHours = endDate.getHours().toString().padStart(2, "0");
         const endMins = endDate.getMinutes().toString().padStart(2, "0");
+        const isHome = entry.homeAway === "h";
 
         return {
-          id: `mc-${match.id}`,
+          id: `mc-${entry.id}`,
           team: "man-city" as const,
-          opponent,
+          opponent: entry.opponentLocation || entry.opponentName,
           date: gameDate.toISOString(),
           time: `${hours}:${mins}`,
           endTime: `${endHours}:${endMins}`,
-          venue: match.venue || (isHome ? "Etihad Stadium" : "Away"),
+          venue: isHome ? "Etihad Stadium" : entry.opponentLocation || "Away",
           isHome,
-          competition: match.competition?.name || "Premier League",
+          competition: entry.leagueName || "Premier League",
         };
-      }
-    );
+      });
   } catch (error) {
     console.error("Error fetching Man City schedule:", error);
-    return getManCityFallback();
+    return [];
   }
-}
-
-function getManCityFallback(): SportsGame[] {
-  // Generate sample upcoming games when API is unavailable
-  const games: SportsGame[] = [];
-  const opponents = [
-    "Arsenal", "Liverpool", "Chelsea", "Tottenham", "Manchester United",
-    "Newcastle", "Aston Villa", "West Ham", "Brighton", "Wolves",
-  ];
-  const now = new Date();
-
-  for (let i = 0; i < 8; i++) {
-    const gameDate = new Date(now);
-    gameDate.setDate(now.getDate() + (i * 4) + 2);
-    // Weekend games typically at 10am or 12:30pm ET
-    const isWeekend = gameDate.getDay() === 0 || gameDate.getDay() === 6;
-    gameDate.setHours(isWeekend ? 10 : 15, isWeekend ? 0 : 0, 0, 0);
-    const isHome = i % 2 === 0;
-
-    games.push({
-      id: `mc-fallback-${i}`,
-      team: "man-city",
-      opponent: opponents[i],
-      date: gameDate.toISOString(),
-      time: `${gameDate.getHours().toString().padStart(2, "0")}:${gameDate.getMinutes().toString().padStart(2, "0")}`,
-      endTime: `${(gameDate.getHours() + 2).toString().padStart(2, "0")}:${gameDate.getMinutes().toString().padStart(2, "0")}`,
-      venue: isHome ? "Etihad Stadium" : "Away",
-      isHome,
-      competition: "Premier League",
-    });
-  }
-  return games;
 }
 
 async function fetchIllinoisBasketballSchedule(): Promise<SportsGame[]> {
-  // ESPN doesn't have a free public API, so we use a fallback schedule
-  // In production, you'd scrape or use a paid API
-  return getIllinoisFallback();
-}
+  try {
+    const res = await fetch(
+      "https://cdn.espn.com/core/mens-college-basketball/team/_/id/356/schedule?xhr=1&render=false",
+      { next: { revalidate: 21600 } }
+    );
 
-function getIllinoisFallback(): SportsGame[] {
-  const games: SportsGame[] = [];
-  const opponents = [
-    "Indiana", "Ohio State", "Michigan", "Purdue", "Iowa",
-    "Wisconsin", "Northwestern", "Minnesota", "Penn State", "Nebraska",
-  ];
-  const now = new Date();
+    if (!res.ok) {
+      console.error("ESPN Illinois API error:", res.status);
+      return [];
+    }
 
-  for (let i = 0; i < 8; i++) {
-    const gameDate = new Date(now);
-    gameDate.setDate(now.getDate() + (i * 3) + 1);
-    // Basketball games typically evening or afternoon
-    const isWeekend = gameDate.getDay() === 0 || gameDate.getDay() === 6;
-    gameDate.setHours(isWeekend ? 14 : 19, 0, 0, 0);
-    const isHome = i % 2 === 0;
+    const data: ESPNScheduleResponse = await res.json();
+    const feed = data?.columns?.[0]?.items?.[0]?.feed;
+    if (!feed) return [];
 
-    games.push({
-      id: `ill-fallback-${i}`,
-      team: "illinois-basketball",
-      opponent: opponents[i],
-      date: gameDate.toISOString(),
-      time: `${gameDate.getHours().toString().padStart(2, "0")}:00`,
-      endTime: `${(gameDate.getHours() + 2).toString().padStart(2, "0")}:30`,
-      venue: isHome ? "State Farm Center" : "Away",
-      isHome,
-      competition: "Big Ten",
-    });
+    return feed
+      .filter((entry) => entry.statusName === "STATUS_SCHEDULED")
+      .map((entry) => {
+        const gameDate = new Date(entry.date);
+        const hours = gameDate.getHours().toString().padStart(2, "0");
+        const mins = gameDate.getMinutes().toString().padStart(2, "0");
+        const endDate = new Date(gameDate.getTime() + 2.5 * 60 * 60 * 1000);
+        const endHours = endDate.getHours().toString().padStart(2, "0");
+        const endMins = endDate.getMinutes().toString().padStart(2, "0");
+        const isHome = entry.homeAway === "h";
+
+        return {
+          id: `ill-${entry.id}`,
+          team: "illinois-basketball" as const,
+          opponent: entry.opponentLocation || entry.opponentName,
+          date: gameDate.toISOString(),
+          time: `${hours}:${mins}`,
+          endTime: `${endHours}:${endMins}`,
+          venue: isHome ? "State Farm Center" : "Away",
+          isHome,
+          competition: "Big Ten",
+        };
+      });
+  } catch (error) {
+    console.error("Error fetching Illinois schedule:", error);
+    return [];
   }
-  return games;
 }
 
 export async function GET() {

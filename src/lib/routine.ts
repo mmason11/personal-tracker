@@ -70,16 +70,47 @@ export function getDefaultRoutine(week: number): RoutineItem[] {
       weekdaysOnly: true,
     },
     {
+      id: "morning-workout",
+      name: "Morning Workout",
+      time: "06:45",
+      endTime: "07:15",
+    },
+    {
       id: "workout",
       name: "Workout",
       time: "17:30",
       endTime: "18:15",
     },
     {
+      id: "dinner",
+      name: "Dinner",
+      time: "18:15",
+      endTime: "18:45",
+    },
+    {
       id: "wash-face",
       name: "Wash Face & Brush Teeth",
       time: "21:00",
       endTime: "21:15",
+    },
+    {
+      id: "reading",
+      name: "Reading",
+      time: "21:15",
+      endTime: "21:45",
+    },
+    {
+      id: "lights-off",
+      name: "Lights Off",
+      time: "21:45",
+      endTime: "22:00",
+    },
+    {
+      id: "church",
+      name: "Church",
+      time: "11:30",
+      endTime: "13:00",
+      sundaysOnly: true,
     },
   ];
 }
@@ -91,8 +122,25 @@ export function isWeekday(date: Date): boolean {
 
 export function getRoutineForDate(date: Date, week: number): RoutineItem[] {
   const routine = getDefaultRoutine(week);
-  if (!isWeekday(date)) {
-    return routine.filter((item) => !item.weekdaysOnly);
-  }
-  return routine;
+  const isSunday = date.getDay() === 0;
+  return routine.filter((item) => {
+    if (item.weekdaysOnly && !isWeekday(date)) return false;
+    if (item.sundaysOnly && !isSunday) return false;
+    return true;
+  });
+}
+
+export interface DailyGoal {
+  id: string;
+  name: string;
+  routineId: string;
+}
+
+export function getDailyGoals(): DailyGoal[] {
+  return [
+    { id: "goal-wake-up", name: "Wake up timely", routineId: "wake-up" },
+    { id: "goal-morning-workout", name: "Morning workout", routineId: "morning-workout" },
+    { id: "goal-afternoon-workout", name: "Afternoon workout", routineId: "workout" },
+    { id: "goal-reading", name: "Nightly reading", routineId: "reading" },
+  ];
 }

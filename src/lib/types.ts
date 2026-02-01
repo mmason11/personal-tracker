@@ -4,6 +4,7 @@ export interface RoutineItem {
   time: string; // HH:mm format
   endTime?: string; // HH:mm format for duration-based items
   weekdaysOnly?: boolean;
+  sundaysOnly?: boolean;
   progressive?: {
     startTime: string; // HH:mm
     endTime: string; // HH:mm
