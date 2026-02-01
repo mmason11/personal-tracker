@@ -50,6 +50,82 @@ function getCurrentTimeMinutes(): number {
 const PX_PER_MIN = 1.8;
 const DRAG_THRESHOLD = 5;
 const SNAP_MINUTES = 5;
+const LEFT_GUTTER = 80; // px reserved for hour labels
+const RIGHT_PAD = 8; // px padding on right
+
+interface ColumnInfo {
+  column: number;
+  totalColumns: number;
+}
+
+function computeColumns(blocks: TimeBlock[]): Map<string, ColumnInfo> {
+  const result = new Map<string, ColumnInfo>();
+  if (blocks.length === 0) return result;
+
+  // Sort by start time, then longest duration first
+  const sorted = [...blocks].sort((a, b) => {
+    const aStart = timeToMinutes(a.start);
+    const bStart = timeToMinutes(b.start);
+    if (aStart !== bStart) return aStart - bStart;
+    const aDur = timeToMinutes(a.end) - aStart;
+    const bDur = timeToMinutes(b.end) - bStart;
+    return bDur - aDur;
+  });
+
+  // Group overlapping blocks into clusters
+  type Placed = { block: TimeBlock; column: number };
+  const clusters: Placed[][] = [];
+
+  for (const block of sorted) {
+    const bStart = timeToMinutes(block.start);
+    const bEnd = timeToMinutes(block.end);
+
+    // Find which cluster this block belongs to (overlaps with any member)
+    let targetCluster: Placed[] | null = null;
+    for (const cluster of clusters) {
+      for (const placed of cluster) {
+        const pStart = timeToMinutes(placed.block.start);
+        const pEnd = timeToMinutes(placed.block.end);
+        if (bStart < pEnd && bEnd > pStart) {
+          targetCluster = cluster;
+          break;
+        }
+      }
+      if (targetCluster) break;
+    }
+
+    if (!targetCluster) {
+      targetCluster = [];
+      clusters.push(targetCluster);
+    }
+
+    // Find the first column where this block doesn't overlap with existing blocks
+    const columnEnds: number[] = []; // track end time per column
+    for (const placed of targetCluster) {
+      const pStart = timeToMinutes(placed.block.start);
+      const pEnd = timeToMinutes(placed.block.end);
+      while (columnEnds.length <= placed.column) columnEnds.push(0);
+      columnEnds[placed.column] = Math.max(columnEnds[placed.column], pEnd);
+    }
+
+    let col = 0;
+    while (col < columnEnds.length && columnEnds[col] > bStart) {
+      col++;
+    }
+
+    targetCluster.push({ block, column: col });
+  }
+
+  // Write results — totalColumns is per-cluster
+  for (const cluster of clusters) {
+    const maxCol = Math.max(...cluster.map((p) => p.column)) + 1;
+    for (const placed of cluster) {
+      result.set(placed.block.id, { column: placed.column, totalColumns: maxCol });
+    }
+  }
+
+  return result;
+}
 
 export default function DayTimeline() {
   const [blocks, setBlocks] = useState<TimeBlock[]>([]);
@@ -391,7 +467,7 @@ export default function DayTimeline() {
               <div
                 key={h}
                 className="absolute left-0 right-0 flex items-center pointer-events-none"
-                style={{ top: `${y}px` }}
+                style={{ top: `${y}px`, transform: "translateY(-50%)" }}
               >
                 <span className="text-xs text-slate-500 w-16 flex-shrink-0 text-right pr-3 font-mono">
                   {h === 0 ? "12 AM" : h < 12 ? `${h} AM` : h === 12 ? "12 PM" : `${h - 12} PM`}
@@ -405,7 +481,7 @@ export default function DayTimeline() {
           {showCurrentLine && (
             <div
               className="absolute left-0 right-0 flex items-center z-20 pointer-events-none"
-              style={{ top: `${currentTimeY}px` }}
+              style={{ top: `${currentTimeY}px`, transform: "translateY(-50%)" }}
             >
               <span className="text-xs text-red-400 w-16 flex-shrink-0 text-right pr-3 font-bold font-mono">
                 {formatTime12h(
@@ -420,7 +496,9 @@ export default function DayTimeline() {
           )}
 
           {/* Event blocks */}
-          {blocks.map((block) => {
+          {(() => {
+            const columnMap = computeColumns(blocks);
+            return blocks.map((block) => {
             const isDragging = dragState?.blockId === block.id;
             const startMin = isDragging ? dragState.currentStartMin : timeToMinutes(block.start);
             const endMin = isDragging ? dragState.currentEndMin : timeToMinutes(block.end);
@@ -456,17 +534,23 @@ export default function DayTimeline() {
             const displayStart = isDragging ? minutesToTime(dragState.currentStartMin) : block.start;
             const displayEnd = isDragging ? minutesToTime(dragState.currentEndMin) : block.end;
 
+            const colInfo = columnMap.get(block.id) || { column: 0, totalColumns: 1 };
+            const containerWidth = containerRef.current?.clientWidth || 600;
+            const availableWidth = containerWidth - LEFT_GUTTER - RIGHT_PAD;
+            const colWidth = availableWidth / colInfo.totalColumns;
+            const colLeft = LEFT_GUTTER + colInfo.column * colWidth;
+
             return (
               <div
                 key={block.id}
-                className={`absolute left-20 right-2 rounded-xl border bg-gradient-to-r ${bgClass} px-3 py-1.5 z-10 overflow-hidden ${
+                className={`absolute rounded-xl border bg-gradient-to-r ${bgClass} px-3 py-1.5 z-10 overflow-hidden ${
                   block.editable
                     ? isDragging
                       ? "cursor-grabbing opacity-90 shadow-lg shadow-black/30 ring-2 ring-violet-500/30"
                       : "cursor-grab hover:brightness-110"
                     : ""
                 }`}
-                style={{ top: `${y}px`, height: `${h}px` }}
+                style={{ top: `${y}px`, height: `${h}px`, left: `${colLeft}px`, width: `${colWidth}px` }}
                 onPointerDown={(e) => {
                   if (block.editable) handlePointerDown(e, block.id, "move");
                 }}
@@ -499,7 +583,8 @@ export default function DayTimeline() {
                 )}
               </div>
             );
-          })}
+          });
+          })()}
         </div>
       )}
 
