@@ -151,7 +151,7 @@ export default function DayTimeline() {
   const [editorState, setEditorState] = useState<{
     mode: "create" | "edit";
     blockId?: string;
-    blockType?: "custom" | "routine";
+    blockType?: string;
     initialData: { name: string; start: string; end: string; date: string };
   } | null>(null);
 
@@ -358,14 +358,14 @@ export default function DayTimeline() {
     });
   };
 
-  // Click on editable block to edit
+  // Click on block to edit
   const handleBlockClick = (block: TimeBlock) => {
     if (dragState?.hasMoved) return;
-    if (!block.editable) return;
+    const blockType = block.type === "custom" ? "custom" : block.type === "routine" ? "routine" : block.type;
     setEditorState({
       mode: "edit",
       blockId: block.id,
-      blockType: block.type === "custom" ? "custom" : "routine",
+      blockType: blockType as "custom" | "routine",
       initialData: { name: block.name, start: block.start, end: block.end, date: dateStr },
     });
   };
@@ -548,7 +548,7 @@ export default function DayTimeline() {
                     ? isDragging
                       ? "cursor-grabbing opacity-90 shadow-lg shadow-black/30 ring-2 ring-violet-500/30"
                       : "cursor-grab hover:brightness-110"
-                    : ""
+                    : "cursor-pointer hover:brightness-110"
                 }`}
                 style={{ top: `${y}px`, height: `${h}px`, left: `${colLeft}px`, width: `${colWidth}px` }}
                 onPointerDown={(e) => {
@@ -589,43 +589,47 @@ export default function DayTimeline() {
       )}
 
       {/* Event Editor Modal */}
-      {editorState && (
-        <EventEditor
-          mode={editorState.mode}
-          eventType={editorState.blockType}
-          initialData={editorState.initialData}
-          onSave={async (data) => {
-            if (editorState.mode === "create") {
-              await addCustomEvent({ name: data.name, date: data.date, start: data.start, end: data.end });
-            } else if (editorState.blockType === "custom") {
-              await updateCustomEvent(editorState.blockId!, { name: data.name, start: data.start, end: data.end, date: data.date });
-            } else if (editorState.blockType === "routine") {
-              await setRoutineOverride(editorState.blockId!, data.date, data.start, data.end);
+      {editorState && (() => {
+        const isReadOnly = editorState.blockType !== "custom" && editorState.blockType !== "routine" && editorState.mode === "edit";
+        return (
+          <EventEditor
+            mode={editorState.mode}
+            eventType={editorState.blockType === "custom" ? "custom" : editorState.blockType === "routine" ? "routine" : undefined}
+            readOnly={isReadOnly}
+            initialData={editorState.initialData}
+            onSave={async (data) => {
+              if (editorState.mode === "create") {
+                await addCustomEvent({ name: data.name, date: data.date, start: data.start, end: data.end });
+              } else if (editorState.blockType === "custom") {
+                await updateCustomEvent(editorState.blockId!, { name: data.name, start: data.start, end: data.end, date: data.date });
+              } else if (editorState.blockType === "routine") {
+                await setRoutineOverride(editorState.blockId!, data.date, data.start, data.end);
+              }
+              setEditorState(null);
+              loadData();
+            }}
+            onDelete={
+              editorState.blockType === "custom"
+                ? async () => {
+                    await removeCustomEvent(editorState.blockId!);
+                    setEditorState(null);
+                    loadData();
+                  }
+                : undefined
             }
-            setEditorState(null);
-            loadData();
-          }}
-          onDelete={
-            editorState.blockType === "custom"
-              ? async () => {
-                  await removeCustomEvent(editorState.blockId!);
-                  setEditorState(null);
-                  loadData();
-                }
-              : undefined
-          }
-          onResetRoutine={
-            editorState.blockType === "routine" && editorState.mode === "edit"
-              ? async () => {
-                  await removeRoutineOverride(editorState.blockId!, dateStr);
-                  setEditorState(null);
-                  loadData();
-                }
-              : undefined
-          }
-          onClose={() => setEditorState(null)}
-        />
-      )}
+            onResetRoutine={
+              editorState.blockType === "routine" && editorState.mode === "edit"
+                ? async () => {
+                    await removeRoutineOverride(editorState.blockId!, dateStr);
+                    setEditorState(null);
+                    loadData();
+                  }
+                : undefined
+            }
+            onClose={() => setEditorState(null)}
+          />
+        );
+      })()}
     </div>
   );
 }

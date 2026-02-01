@@ -5,6 +5,7 @@ import { useState, useEffect, useRef } from "react";
 interface EventEditorProps {
   mode: "create" | "edit";
   eventType?: "custom" | "routine";
+  readOnly?: boolean;
   initialData: { name: string; start: string; end: string; date: string };
   onSave: (data: { name: string; start: string; end: string; date: string }) => void;
   onDelete?: () => void;
@@ -15,6 +16,7 @@ interface EventEditorProps {
 export default function EventEditor({
   mode,
   eventType,
+  readOnly,
   initialData,
   onSave,
   onDelete,
@@ -53,6 +55,7 @@ export default function EventEditor({
   };
 
   const isRoutine = eventType === "routine";
+  const isDisabled = isRoutine || readOnly;
 
   return (
     <div
@@ -64,7 +67,7 @@ export default function EventEditor({
     >
       <div className="bg-slate-800 rounded-2xl border border-slate-700/50 p-6 shadow-2xl w-full max-w-sm mx-4">
         <h3 className="text-lg font-bold text-white mb-4">
-          {mode === "create" ? "New Event" : isRoutine ? "Edit Routine Time" : "Edit Event"}
+          {mode === "create" ? "New Event" : readOnly ? "Event Details" : isRoutine ? "Edit Routine Time" : "Edit Event"}
         </h3>
 
         <div className="space-y-3">
@@ -74,10 +77,10 @@ export default function EventEditor({
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              disabled={isRoutine}
+              disabled={isDisabled}
               placeholder="Event name"
               className="w-full bg-slate-700/60 border border-slate-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-violet-500 disabled:opacity-50 disabled:cursor-not-allowed"
-              autoFocus={!isRoutine}
+              autoFocus={!isDisabled}
             />
           </div>
 
@@ -87,7 +90,7 @@ export default function EventEditor({
               type="date"
               value={date}
               onChange={(e) => setDate(e.target.value)}
-              disabled={isRoutine}
+              disabled={isDisabled}
               className="w-full bg-slate-700/60 border border-slate-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-violet-500 disabled:opacity-50 disabled:cursor-not-allowed"
             />
           </div>
@@ -99,7 +102,8 @@ export default function EventEditor({
                 type="time"
                 value={start}
                 onChange={(e) => setStart(e.target.value)}
-                className="w-full bg-slate-700/60 border border-slate-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-violet-500"
+                disabled={readOnly}
+                className="w-full bg-slate-700/60 border border-slate-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-violet-500 disabled:opacity-50 disabled:cursor-not-allowed"
               />
             </div>
             <div>
@@ -108,7 +112,8 @@ export default function EventEditor({
                 type="time"
                 value={end}
                 onChange={(e) => setEnd(e.target.value)}
-                className="w-full bg-slate-700/60 border border-slate-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-violet-500"
+                disabled={readOnly}
+                className="w-full bg-slate-700/60 border border-slate-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-violet-500 disabled:opacity-50 disabled:cursor-not-allowed"
               />
             </div>
           </div>
@@ -140,14 +145,16 @@ export default function EventEditor({
               onClick={onClose}
               className="text-sm text-slate-400 hover:text-white transition-colors px-3 py-1.5"
             >
-              Cancel
+              {readOnly ? "Close" : "Cancel"}
             </button>
-            <button
-              onClick={handleSubmit}
-              className="text-sm font-semibold px-4 py-1.5 bg-gradient-to-r from-violet-600 to-blue-600 text-white rounded-lg hover:from-violet-500 hover:to-blue-500 transition-all shadow-lg shadow-violet-500/20"
-            >
-              {mode === "create" ? "Create" : "Save"}
-            </button>
+            {!readOnly && (
+              <button
+                onClick={handleSubmit}
+                className="text-sm font-semibold px-4 py-1.5 bg-gradient-to-r from-violet-600 to-blue-600 text-white rounded-lg hover:from-violet-500 hover:to-blue-500 transition-all shadow-lg shadow-violet-500/20"
+              >
+                {mode === "create" ? "Create" : "Save"}
+              </button>
+            )}
           </div>
         </div>
       </div>

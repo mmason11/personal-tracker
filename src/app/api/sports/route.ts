@@ -1,6 +1,15 @@
 import { NextResponse } from "next/server";
 import { SportsGame } from "@/lib/types";
 
+function toCentralTime(date: Date): { hours: string; mins: string; dateStr: string } {
+  const central = new Date(date.toLocaleString("en-US", { timeZone: "America/Chicago" }));
+  return {
+    hours: central.getHours().toString().padStart(2, "0"),
+    mins: central.getMinutes().toString().padStart(2, "0"),
+    dateStr: central.toISOString(),
+  };
+}
+
 interface ESPNFeedEntry {
   id: string;
   date: string;
@@ -42,11 +51,9 @@ async function fetchManCitySchedule(): Promise<SportsGame[]> {
       .filter((entry) => entry.statusName === "STATUS_SCHEDULED")
       .map((entry) => {
         const gameDate = new Date(entry.date);
-        const hours = gameDate.getHours().toString().padStart(2, "0");
-        const mins = gameDate.getMinutes().toString().padStart(2, "0");
+        const start = toCentralTime(gameDate);
         const endDate = new Date(gameDate.getTime() + 2 * 60 * 60 * 1000);
-        const endHours = endDate.getHours().toString().padStart(2, "0");
-        const endMins = endDate.getMinutes().toString().padStart(2, "0");
+        const end = toCentralTime(endDate);
         const isHome = entry.homeAway === "h";
 
         return {
@@ -54,8 +61,8 @@ async function fetchManCitySchedule(): Promise<SportsGame[]> {
           team: "man-city" as const,
           opponent: entry.opponentLocation || entry.opponentName,
           date: gameDate.toISOString(),
-          time: `${hours}:${mins}`,
-          endTime: `${endHours}:${endMins}`,
+          time: `${start.hours}:${start.mins}`,
+          endTime: `${end.hours}:${end.mins}`,
           venue: isHome ? "Etihad Stadium" : entry.opponentLocation || "Away",
           isHome,
           competition: entry.leagueName || "Premier League",
@@ -87,11 +94,9 @@ async function fetchIllinoisBasketballSchedule(): Promise<SportsGame[]> {
       .filter((entry) => entry.statusName === "STATUS_SCHEDULED")
       .map((entry) => {
         const gameDate = new Date(entry.date);
-        const hours = gameDate.getHours().toString().padStart(2, "0");
-        const mins = gameDate.getMinutes().toString().padStart(2, "0");
+        const start = toCentralTime(gameDate);
         const endDate = new Date(gameDate.getTime() + 2.5 * 60 * 60 * 1000);
-        const endHours = endDate.getHours().toString().padStart(2, "0");
-        const endMins = endDate.getMinutes().toString().padStart(2, "0");
+        const end = toCentralTime(endDate);
         const isHome = entry.homeAway === "h";
 
         return {
@@ -99,8 +104,8 @@ async function fetchIllinoisBasketballSchedule(): Promise<SportsGame[]> {
           team: "illinois-basketball" as const,
           opponent: entry.opponentLocation || entry.opponentName,
           date: gameDate.toISOString(),
-          time: `${hours}:${mins}`,
-          endTime: `${endHours}:${endMins}`,
+          time: `${start.hours}:${start.mins}`,
+          endTime: `${end.hours}:${end.mins}`,
           venue: isHome ? "State Farm Center" : "Away",
           isHome,
           competition: "Big Ten",
