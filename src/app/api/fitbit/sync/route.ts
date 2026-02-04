@@ -5,16 +5,38 @@ const FITBIT_API = "https://api.fitbit.com";
 const STALE_TODAY_MS = 2 * 60 * 60 * 1000; // 2 hours
 const STALE_PAST_MS = 24 * 60 * 60 * 1000; // 24 hours
 
+async function refreshFitbitToken(refreshToken: string) {
+  const clientId = process.env.FITBIT_CLIENT_ID!;
+  const clientSecret = process.env.FITBIT_CLIENT_SECRET!;
+
+  const res = await fetch("https://api.fitbit.com/oauth2/token", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      Authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString("base64")}`,
+    },
+    body: new URLSearchParams({
+      grant_type: "refresh_token",
+      refresh_token: refreshToken,
+    }),
+  });
+  return res.json();
+}
+
 async function fitbitFetch(endpoint: string, token: string) {
   const res = await fetch(`${FITBIT_API}${endpoint}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
-  if (!res.ok) throw new Error(`Fitbit API error: ${res.status}`);
+  if (!res.ok) {
+    const err = new Error(`Fitbit API error: ${res.status}`) as Error & { status: number };
+    err.status = res.status;
+    throw err;
+  }
   return res.json();
 }
 
 export async function POST(request: Request) {
-  const { access_token, dates } = await request.json();
+  const { access_token, refresh_token, dates } = await request.json();
 
   if (!access_token || !dates || !Array.isArray(dates)) {
     return NextResponse.json({ error: "Missing access_token or dates" }, { status: 400 });
@@ -26,8 +48,43 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   }
 
+  let currentToken = access_token;
+  let tokenRefreshed = false;
+
+  // Try to refresh the token proactively if we have a refresh token
+  // and check stored expiry
+  if (refresh_token) {
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("fitbit_token_expires_at")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    const now = Math.floor(Date.now() / 1000);
+    if (profile?.fitbit_token_expires_at && now >= profile.fitbit_token_expires_at) {
+      const refreshed = await refreshFitbitToken(refresh_token);
+      if (refreshed.access_token) {
+        currentToken = refreshed.access_token;
+        tokenRefreshed = true;
+        await supabase
+          .from("profiles")
+          .update({
+            fitbit_access_token: refreshed.access_token,
+            fitbit_refresh_token: refreshed.refresh_token,
+            fitbit_token_expires_at: Math.floor(Date.now() / 1000) + (refreshed.expires_in || 28800),
+          })
+          .eq("id", user.id);
+      } else {
+        return NextResponse.json(
+          { error: "Token expired. Please reconnect Fitbit.", needsReconnect: true },
+          { status: 401 }
+        );
+      }
+    }
+  }
+
   const today = new Date().toISOString().substring(0, 10);
-  const results = { activity: 0, heartRate: 0, sleep: 0, skipped: 0, errors: 0 };
+  const results = { activity: 0, heartRate: 0, sleep: 0, skipped: 0, errors: 0, tokenRefreshed };
 
   for (const date of dates) {
     const isToday = date === today;
@@ -51,10 +108,43 @@ export async function POST(request: Request) {
 
     try {
       // Fetch activity
-      const activityData = await fitbitFetch(
-        `/1/user/-/activities/date/${date}.json`,
-        access_token
-      );
+      let activityData;
+      try {
+        activityData = await fitbitFetch(
+          `/1/user/-/activities/date/${date}.json`,
+          currentToken
+        );
+      } catch (err) {
+        // If 401 and we haven't refreshed yet, try refreshing
+        if ((err as Error & { status?: number }).status === 401 && !tokenRefreshed && refresh_token) {
+          const refreshed = await refreshFitbitToken(refresh_token);
+          if (refreshed.access_token) {
+            currentToken = refreshed.access_token;
+            tokenRefreshed = true;
+            await supabase
+              .from("profiles")
+              .update({
+                fitbit_access_token: refreshed.access_token,
+                fitbit_refresh_token: refreshed.refresh_token,
+                fitbit_token_expires_at: Math.floor(Date.now() / 1000) + (refreshed.expires_in || 28800),
+              })
+              .eq("id", user.id);
+            // Retry with new token
+            activityData = await fitbitFetch(
+              `/1/user/-/activities/date/${date}.json`,
+              currentToken
+            );
+          } else {
+            return NextResponse.json(
+              { error: "Token expired. Please reconnect Fitbit.", needsReconnect: true, ...results },
+              { status: 401 }
+            );
+          }
+        } else {
+          throw err;
+        }
+      }
+
       const summary = activityData.summary || {};
       await supabase.from("fitbit_daily_activity").upsert(
         {
@@ -79,7 +169,7 @@ export async function POST(request: Request) {
       try {
         const hrData = await fitbitFetch(
           `/1/user/-/activities/heart/date/${date}/1d.json`,
-          access_token
+          currentToken
         );
         const hrSummary = hrData["activities-heart"]?.[0]?.value || {};
         const zones = hrSummary.heartRateZones || [];
@@ -111,7 +201,7 @@ export async function POST(request: Request) {
       try {
         const sleepData = await fitbitFetch(
           `/1.2/user/-/sleep/date/${date}.json`,
-          access_token
+          currentToken
         );
         const mainSleep = sleepData.sleep?.find((s: { isMainSleep: boolean }) => s.isMainSleep);
         if (mainSleep) {

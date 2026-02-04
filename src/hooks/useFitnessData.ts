@@ -137,17 +137,22 @@ export function useFitnessData(range: DateRange) {
   }, [supabase, getDates]);
 
   const syncFitbit = useCallback(async () => {
-    const { accessToken } = await getFitbitTokens();
+    const { accessToken, refreshToken } = await getFitbitTokens();
     if (!accessToken) return;
 
     setSyncing(true);
     try {
       const dates = getDates();
-      await fetch("/api/fitbit/sync", {
+      const res = await fetch("/api/fitbit/sync", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ access_token: accessToken, dates }),
+        body: JSON.stringify({ access_token: accessToken, refresh_token: refreshToken, dates }),
       });
+      const result = await res.json();
+      if (result.needsReconnect) {
+        setFitbitConnected(false);
+        console.error("Fitbit token expired, needs reconnect");
+      }
       await loadFromSupabase();
     } catch (err) {
       console.error("Fitbit sync error:", err);

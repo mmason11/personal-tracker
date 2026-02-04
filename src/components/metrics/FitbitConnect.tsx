@@ -17,7 +17,8 @@ export default function FitbitConnect({ connected, onConnectionChange, onSync, s
         await saveFitbitTokens(
           event.data.access_token,
           event.data.refresh_token,
-          event.data.user_id
+          event.data.user_id,
+          event.data.expires_at
         );
         onConnectionChange(true);
         onSync();

@@ -44,13 +44,16 @@ export async function GET(request: Request) {
     );
   }
 
+  const expiresAt = Math.floor(Date.now() / 1000) + (tokenData.expires_in || 28800);
+
   return new Response(
     `<html><body><script>
       window.opener?.postMessage({
         type: "fitbit-auth",
         access_token: "${tokenData.access_token}",
         refresh_token: "${tokenData.refresh_token}",
-        user_id: "${tokenData.user_id}"
+        user_id: "${tokenData.user_id}",
+        expires_at: ${expiresAt}
       }, "*");
       window.close();
     </script><p>Connected! You can close this window.</p></body></html>`,

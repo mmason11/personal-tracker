@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS profiles (
   fitbit_access_token TEXT,
   fitbit_refresh_token TEXT,
   fitbit_user_id TEXT,
+  fitbit_token_expires_at BIGINT,
   strava_access_token TEXT,
   strava_refresh_token TEXT,
   strava_token_expires_at BIGINT,

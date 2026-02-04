@@ -23,11 +23,11 @@ export default function Home() {
 
   const tabs: { id: Tab; label: string; icon: string }[] = [
     { id: "dashboard", label: "Home", icon: "M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" },
+    { id: "summary", label: "Summary", icon: "M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" },
     { id: "sports", label: "Games", icon: "M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" },
     { id: "todos", label: "Tasks", icon: "M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" },
     { id: "calendar", label: "Calendar", icon: "M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" },
     { id: "metrics", label: "Metrics", icon: "M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" },
-    { id: "summary", label: "Summary", icon: "M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" },
   ];
 
   if (loading) {
@@ -91,16 +91,16 @@ export default function Home() {
         {activeTab === "dashboard" && (
           <div className="space-y-6">
             <MorningReview />
+            <RoutineTracker />
             <DayTimeline />
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <RoutineTracker />
-              <div className="space-y-6">
-                <BigThree />
-                <TodoSummary />
-              </div>
+              <BigThree />
+              <TodoSummary />
             </div>
           </div>
         )}
+
+        {activeTab === "summary" && <DailySummary />}
 
         {activeTab === "sports" && <SportsSchedule />}
 
@@ -109,8 +109,6 @@ export default function Home() {
         {activeTab === "calendar" && <GoogleCalendar />}
 
         {activeTab === "metrics" && <MetricsPage />}
-
-        {activeTab === "summary" && <DailySummary />}
       </main>
 
       {/* Mobile bottom nav */}

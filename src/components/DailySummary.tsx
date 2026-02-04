@@ -5,28 +5,18 @@ import { format, subDays } from "date-fns";
 import { createClient } from "@/lib/supabase/client";
 import { getDailyGoals } from "@/lib/routine";
 import TrendChart from "@/components/metrics/TrendChart";
-import type { FitbitActivity, FitbitHeartRate, FitbitSleep } from "@/hooks/useFitnessData";
 
 type SummaryRange = "7days" | "30days" | "monthly";
-
-interface StravaDay {
-  distance: number; // meters total
-  calories: number;
-  avgHr: number | null;
-  activities: number;
-}
 
 interface DayData {
   date: string;
   goals: Record<string, boolean>;
   goalsCompleted: number;
   goalCount: number;
-  // Fitbit
   steps: number | null;
+  calories: number | null;
   restingHr: number | null;
   sleepMinutes: number | null;
-  // Strava
-  strava: StravaDay | null;
 }
 
 interface MonthData {
@@ -34,11 +24,9 @@ interface MonthData {
   days: number;
   avgGoalPct: number;
   avgSteps: number | null;
+  avgCalories: number | null;
   avgRestingHr: number | null;
   avgSleepMinutes: number | null;
-  avgStravaDistance: number | null;
-  avgStravaCals: number | null;
-  avgStravaHr: number | null;
 }
 
 const dailyGoals = getDailyGoals();
@@ -74,82 +62,42 @@ export default function DailySummary() {
       .gte("date", startDate)
       .lte("date", endDate);
 
-    // Fetch fitbit data + strava activities in parallel
-    const [
-      { data: activityData },
-      { data: hrData },
-      { data: sleepData },
-      { data: stravaData },
-    ] = await Promise.all([
-      supabase
-        .from("fitbit_daily_activity")
-        .select("date, steps")
-        .eq("user_id", user.id)
-        .gte("date", startDate)
-        .lte("date", endDate)
-        .order("date", { ascending: true }),
-      supabase
-        .from("fitbit_heart_rate")
-        .select("date, resting_hr")
-        .eq("user_id", user.id)
-        .gte("date", startDate)
-        .lte("date", endDate)
-        .order("date", { ascending: true }),
-      supabase
-        .from("fitbit_sleep")
-        .select("date, duration_minutes")
-        .eq("user_id", user.id)
-        .gte("date", startDate)
-        .lte("date", endDate)
-        .order("date", { ascending: true }),
-      supabase
-        .from("strava_activities")
-        .select("start_date, distance_meters, calories, average_heartrate")
-        .eq("user_id", user.id)
-        .gte("start_date", `${startDate}T00:00:00`)
-        .lte("start_date", `${endDate}T23:59:59`)
-        .order("start_date", { ascending: true }),
-    ]);
+    // Fetch fitbit data in parallel
+    const [{ data: activityData }, { data: hrData }, { data: sleepData }] =
+      await Promise.all([
+        supabase
+          .from("fitbit_daily_activity")
+          .select("date, steps, calories_total")
+          .eq("user_id", user.id)
+          .gte("date", startDate)
+          .lte("date", endDate)
+          .order("date", { ascending: true }),
+        supabase
+          .from("fitbit_heart_rate")
+          .select("date, resting_hr")
+          .eq("user_id", user.id)
+          .gte("date", startDate)
+          .lte("date", endDate)
+          .order("date", { ascending: true }),
+        supabase
+          .from("fitbit_sleep")
+          .select("date, duration_minutes")
+          .eq("user_id", user.id)
+          .gte("date", startDate)
+          .lte("date", endDate)
+          .order("date", { ascending: true }),
+      ]);
 
-    // Build Fitbit lookup maps
+    // Build lookup maps
     const activityMap = new Map(
-      (activityData || []).map((a: Pick<FitbitActivity, "date" | "steps">) => [a.date, a])
+      (activityData || []).map((a: { date: string; steps: number; calories_total: number }) => [a.date, a])
     );
     const hrMap = new Map(
-      (hrData || []).map((h: Pick<FitbitHeartRate, "date" | "resting_hr">) => [h.date, h])
+      (hrData || []).map((h: { date: string; resting_hr: number | null }) => [h.date, h])
     );
     const sleepMap = new Map(
-      (sleepData || []).map((s: Pick<FitbitSleep, "date" | "duration_minutes">) => [s.date, s])
+      (sleepData || []).map((s: { date: string; duration_minutes: number }) => [s.date, s])
     );
-
-    // Build Strava daily aggregation map
-    const stravaMap = new Map<string, StravaDay>();
-    for (const s of stravaData || []) {
-      const date = (s.start_date as string).substring(0, 10); // yyyy-MM-dd
-      const existing = stravaMap.get(date);
-      if (existing) {
-        existing.distance += s.distance_meters || 0;
-        existing.calories += s.calories || 0;
-        existing.activities++;
-        if (s.average_heartrate) {
-          if (existing.avgHr !== null) {
-            // Running average
-            existing.avgHr =
-              (existing.avgHr * (existing.activities - 1) + s.average_heartrate) /
-              existing.activities;
-          } else {
-            existing.avgHr = s.average_heartrate;
-          }
-        }
-      } else {
-        stravaMap.set(date, {
-          distance: s.distance_meters || 0,
-          calories: s.calories || 0,
-          avgHr: s.average_heartrate || null,
-          activities: 1,
-        });
-      }
-    }
 
     // Build completion map: date -> routineId -> completed
     const completionMap = new Map<string, Record<string, boolean>>();
@@ -171,22 +119,19 @@ export default function DailySummary() {
         goals[g.routineId] = done;
         if (done) completed++;
       }
-      const activity = activityMap.get(date);
-      const hr = hrMap.get(date);
-      const sleep = sleepMap.get(date);
-      const strava = stravaMap.get(date) || null;
+      const activity = activityMap.get(date) as { steps: number; calories_total: number } | undefined;
+      const hr = hrMap.get(date) as { resting_hr: number | null } | undefined;
+      const sleep = sleepMap.get(date) as { duration_minutes: number } | undefined;
 
       days.push({
         date,
         goals,
         goalsCompleted: completed,
         goalCount: GOAL_COUNT,
-        steps: activity ? (activity as Pick<FitbitActivity, "date" | "steps">).steps : null,
-        restingHr: hr ? (hr as Pick<FitbitHeartRate, "date" | "resting_hr">).resting_hr : null,
-        sleepMinutes: sleep
-          ? (sleep as Pick<FitbitSleep, "date" | "duration_minutes">).duration_minutes
-          : null,
-        strava,
+        steps: activity?.steps ?? null,
+        calories: activity?.calories_total ?? null,
+        restingHr: hr?.resting_hr ?? null,
+        sleepMinutes: sleep?.duration_minutes ?? null,
       });
     }
 
@@ -205,11 +150,16 @@ export default function DailySummary() {
   const goalPct =
     totalGoalsPossible > 0 ? Math.round((totalGoalsHit / totalGoalsPossible) * 100) : 0;
 
-  // Fitbit aggregates
   const daysWithSteps = dayData.filter((d) => d.steps !== null);
   const avgSteps =
     daysWithSteps.length > 0
       ? Math.round(daysWithSteps.reduce((s, d) => s + d.steps!, 0) / daysWithSteps.length)
+      : null;
+
+  const daysWithCals = dayData.filter((d) => d.calories !== null);
+  const avgCals =
+    daysWithCals.length > 0
+      ? Math.round(daysWithCals.reduce((s, d) => s + d.calories!, 0) / daysWithCals.length)
       : null;
 
   const daysWithHr = dayData.filter((d) => d.restingHr !== null);
@@ -225,31 +175,6 @@ export default function DailySummary() {
           daysWithSleep.reduce((s, d) => s + d.sleepMinutes!, 0) / daysWithSleep.length
         )
       : null;
-
-  // Strava aggregates
-  const daysWithStrava = dayData.filter((d) => d.strava !== null);
-  const avgStravaDistance =
-    daysWithStrava.length > 0
-      ? daysWithStrava.reduce((s, d) => s + d.strava!.distance, 0) / daysWithStrava.length
-      : null;
-  const avgStravaCals =
-    daysWithStrava.length > 0
-      ? Math.round(
-          daysWithStrava.reduce((s, d) => s + d.strava!.calories, 0) / daysWithStrava.length
-        )
-      : null;
-  const daysWithStravaHr = dayData.filter(
-    (d) => d.strava !== null && d.strava.avgHr !== null
-  );
-  const avgStravaHr =
-    daysWithStravaHr.length > 0
-      ? Math.round(
-          daysWithStravaHr.reduce((s, d) => s + d.strava!.avgHr!, 0) / daysWithStravaHr.length
-        )
-      : null;
-
-  const hasAnyFitbit = avgSteps !== null || avgHr !== null || avgSleep !== null;
-  const hasAnyStrava = daysWithStrava.length > 0;
 
   // Best day (most goals completed)
   const bestDay =
@@ -280,12 +205,9 @@ export default function DailySummary() {
       .sort(([a], [b]) => b.localeCompare(a))
       .map(([month, days]) => {
         const withSteps = days.filter((d) => d.steps !== null);
+        const withCals = days.filter((d) => d.calories !== null);
         const withHr = days.filter((d) => d.restingHr !== null);
         const withSleep = days.filter((d) => d.sleepMinutes !== null);
-        const withStrava = days.filter((d) => d.strava !== null);
-        const withStravaHr = days.filter(
-          (d) => d.strava !== null && d.strava.avgHr !== null
-        );
         const totalHit = days.reduce((s, d) => s + d.goalsCompleted, 0);
         const totalPossible = days.reduce((s, d) => s + d.goalCount, 0);
         return {
@@ -295,40 +217,19 @@ export default function DailySummary() {
             totalPossible > 0 ? Math.round((totalHit / totalPossible) * 100) : 0,
           avgSteps:
             withSteps.length > 0
-              ? Math.round(
-                  withSteps.reduce((s, d) => s + d.steps!, 0) / withSteps.length
-                )
+              ? Math.round(withSteps.reduce((s, d) => s + d.steps!, 0) / withSteps.length)
+              : null,
+          avgCalories:
+            withCals.length > 0
+              ? Math.round(withCals.reduce((s, d) => s + d.calories!, 0) / withCals.length)
               : null,
           avgRestingHr:
             withHr.length > 0
-              ? Math.round(
-                  withHr.reduce((s, d) => s + d.restingHr!, 0) / withHr.length
-                )
+              ? Math.round(withHr.reduce((s, d) => s + d.restingHr!, 0) / withHr.length)
               : null,
           avgSleepMinutes:
             withSleep.length > 0
-              ? Math.round(
-                  withSleep.reduce((s, d) => s + d.sleepMinutes!, 0) / withSleep.length
-                )
-              : null,
-          avgStravaDistance:
-            withStrava.length > 0
-              ? withStrava.reduce((s, d) => s + d.strava!.distance, 0) /
-                withStrava.length
-              : null,
-          avgStravaCals:
-            withStrava.length > 0
-              ? Math.round(
-                  withStrava.reduce((s, d) => s + d.strava!.calories, 0) /
-                    withStrava.length
-                )
-              : null,
-          avgStravaHr:
-            withStravaHr.length > 0
-              ? Math.round(
-                  withStravaHr.reduce((s, d) => s + d.strava!.avgHr!, 0) /
-                    withStravaHr.length
-                )
+              ? Math.round(withSleep.reduce((s, d) => s + d.sleepMinutes!, 0) / withSleep.length)
               : null,
         };
       });
@@ -343,6 +244,10 @@ export default function DailySummary() {
     .filter((d) => d.steps !== null)
     .reverse()
     .map((d) => ({ label: d.date.substring(5), value: d.steps! }));
+  const calsTrend = [...dayData]
+    .filter((d) => d.calories !== null)
+    .reverse()
+    .map((d) => ({ label: d.date.substring(5), value: d.calories! }));
   const hrTrend = [...dayData]
     .filter((d) => d.restingHr !== null)
     .reverse()
@@ -354,17 +259,6 @@ export default function DailySummary() {
       label: d.date.substring(5),
       value: Math.round((d.sleepMinutes! / 60) * 10) / 10,
     }));
-  const stravaDistTrend = [...dayData]
-    .filter((d) => d.strava !== null)
-    .reverse()
-    .map((d) => ({
-      label: d.date.substring(5),
-      value: Math.round((d.strava!.distance / 1609.34) * 10) / 10,
-    }));
-  const stravaCalsTrend = [...dayData]
-    .filter((d) => d.strava !== null)
-    .reverse()
-    .map((d) => ({ label: d.date.substring(5), value: d.strava!.calories }));
 
   const rangeOptions: { id: SummaryRange; label: string }[] = [
     { id: "7days", label: "7 Days" },
@@ -388,45 +282,16 @@ export default function DailySummary() {
     return format(d, "MMMM yyyy");
   };
 
-  const formatMiles = (meters: number) => {
-    const miles = meters / 1609.34;
-    return miles >= 10 ? `${Math.round(miles)} mi` : `${miles.toFixed(1)} mi`;
-  };
-
   const goalColor = (pct: number) =>
     pct >= 80 ? "text-emerald-400" : pct >= 50 ? "text-amber-400" : "text-red-400";
   const stepsColor = (steps: number) =>
-    steps >= 10000
-      ? "text-emerald-400"
-      : steps >= 7000
-        ? "text-amber-400"
-        : "text-red-400";
-  const hrColor = (hr: number) =>
-    hr <= 60
-      ? "text-emerald-400"
-      : hr <= 72
-        ? "text-blue-400"
-        : "text-amber-400";
-  const sleepColor = (mins: number) =>
-    mins >= 420
-      ? "text-emerald-400"
-      : mins >= 360
-        ? "text-amber-400"
-        : "text-red-400";
-  const distColor = (meters: number) => {
-    const miles = meters / 1609.34;
-    return miles >= 5
-      ? "text-emerald-400"
-      : miles >= 2
-        ? "text-amber-400"
-        : "text-slate-300";
-  };
+    steps >= 10000 ? "text-emerald-400" : steps >= 7000 ? "text-amber-400" : "text-red-400";
   const calsColor = (cals: number) =>
-    cals >= 500
-      ? "text-emerald-400"
-      : cals >= 200
-        ? "text-amber-400"
-        : "text-slate-300";
+    cals >= 2200 ? "text-emerald-400" : cals >= 1800 ? "text-amber-400" : "text-slate-300";
+  const hrColor = (hr: number) =>
+    hr <= 60 ? "text-emerald-400" : hr <= 72 ? "text-blue-400" : "text-amber-400";
+  const sleepColor = (mins: number) =>
+    mins >= 420 ? "text-emerald-400" : mins >= 360 ? "text-amber-400" : "text-red-400";
 
   return (
     <div className="space-y-6">
@@ -457,131 +322,43 @@ export default function DailySummary() {
       ) : (
         <>
           {/* Aggregate stats header */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
             <div className="bg-gradient-to-br from-slate-800 to-slate-800/80 rounded-2xl p-5 shadow-lg border border-slate-700/50">
-              <p className="text-xs text-slate-400 uppercase tracking-wider mb-1">
-                Goal Completion
-              </p>
-              <p className={`text-2xl font-bold ${goalColor(goalPct)}`}>
-                {goalPct}%
-              </p>
+              <p className="text-xs text-slate-400 uppercase tracking-wider mb-1">Goal Completion</p>
+              <p className={`text-2xl font-bold ${goalColor(goalPct)}`}>{goalPct}%</p>
               <p className="text-xs text-slate-500 mt-1">
                 {totalGoalsHit}/{totalGoalsPossible} goals hit
               </p>
             </div>
-            {hasAnyFitbit ? (
-              <>
-                <div className="bg-gradient-to-br from-slate-800 to-slate-800/80 rounded-2xl p-5 shadow-lg border border-slate-700/50">
-                  <p className="text-xs text-slate-400 uppercase tracking-wider mb-1">
-                    Avg Steps
-                  </p>
-                  <p
-                    className={`text-2xl font-bold ${avgSteps !== null ? stepsColor(avgSteps) : "text-slate-500"}`}
-                  >
-                    {avgSteps !== null ? avgSteps.toLocaleString() : "—"}
-                  </p>
-                  <p className="text-xs text-slate-500 mt-1">per day</p>
-                </div>
-                <div className="bg-gradient-to-br from-slate-800 to-slate-800/80 rounded-2xl p-5 shadow-lg border border-slate-700/50">
-                  <p className="text-xs text-slate-400 uppercase tracking-wider mb-1">
-                    Avg Resting HR
-                  </p>
-                  <p
-                    className={`text-2xl font-bold ${avgHr !== null ? hrColor(avgHr) : "text-slate-500"}`}
-                  >
-                    {avgHr !== null ? `${avgHr} bpm` : "—"}
-                  </p>
-                  <p className="text-xs text-slate-500 mt-1">beats per minute</p>
-                </div>
-                <div className="bg-gradient-to-br from-slate-800 to-slate-800/80 rounded-2xl p-5 shadow-lg border border-slate-700/50">
-                  <p className="text-xs text-slate-400 uppercase tracking-wider mb-1">
-                    Avg Sleep
-                  </p>
-                  <p
-                    className={`text-2xl font-bold ${avgSleep !== null ? sleepColor(avgSleep) : "text-slate-500"}`}
-                  >
-                    {avgSleep !== null ? formatSleep(avgSleep) : "—"}
-                  </p>
-                  <p className="text-xs text-slate-500 mt-1">per night</p>
-                </div>
-              </>
-            ) : (
-              <>
-                <div className="bg-gradient-to-br from-slate-800 to-slate-800/80 rounded-2xl p-5 shadow-lg border border-slate-700/50">
-                  <p className="text-xs text-slate-400 uppercase tracking-wider mb-1">
-                    Avg Distance
-                  </p>
-                  <p
-                    className={`text-2xl font-bold ${avgStravaDistance !== null ? distColor(avgStravaDistance) : "text-slate-500"}`}
-                  >
-                    {avgStravaDistance !== null ? formatMiles(avgStravaDistance) : "—"}
-                  </p>
-                  <p className="text-xs text-slate-500 mt-1">per active day</p>
-                </div>
-                <div className="bg-gradient-to-br from-slate-800 to-slate-800/80 rounded-2xl p-5 shadow-lg border border-slate-700/50">
-                  <p className="text-xs text-slate-400 uppercase tracking-wider mb-1">
-                    Avg Workout HR
-                  </p>
-                  <p
-                    className={`text-2xl font-bold ${avgStravaHr !== null ? hrColor(avgStravaHr) : "text-slate-500"}`}
-                  >
-                    {avgStravaHr !== null ? `${avgStravaHr} bpm` : "—"}
-                  </p>
-                  <p className="text-xs text-slate-500 mt-1">during activities</p>
-                </div>
-                <div className="bg-gradient-to-br from-slate-800 to-slate-800/80 rounded-2xl p-5 shadow-lg border border-slate-700/50">
-                  <p className="text-xs text-slate-400 uppercase tracking-wider mb-1">
-                    Avg Calories
-                  </p>
-                  <p
-                    className={`text-2xl font-bold ${avgStravaCals !== null ? calsColor(avgStravaCals) : "text-slate-500"}`}
-                  >
-                    {avgStravaCals !== null ? avgStravaCals.toLocaleString() : "—"}
-                  </p>
-                  <p className="text-xs text-slate-500 mt-1">per active day</p>
-                </div>
-              </>
-            )}
-          </div>
-
-          {/* Strava summary row when Fitbit is also present */}
-          {hasAnyFitbit && hasAnyStrava && (
-            <div className="grid grid-cols-3 gap-4">
-              <div className="bg-gradient-to-br from-orange-900/20 to-slate-800/80 rounded-2xl p-5 shadow-lg border border-orange-700/30">
-                <p className="text-xs text-orange-400 uppercase tracking-wider mb-1">
-                  Strava Distance
-                </p>
-                <p
-                  className={`text-2xl font-bold ${avgStravaDistance !== null ? distColor(avgStravaDistance) : "text-slate-500"}`}
-                >
-                  {avgStravaDistance !== null ? formatMiles(avgStravaDistance) : "—"}
-                </p>
-                <p className="text-xs text-slate-500 mt-1">avg per active day</p>
-              </div>
-              <div className="bg-gradient-to-br from-orange-900/20 to-slate-800/80 rounded-2xl p-5 shadow-lg border border-orange-700/30">
-                <p className="text-xs text-orange-400 uppercase tracking-wider mb-1">
-                  Workout HR
-                </p>
-                <p
-                  className={`text-2xl font-bold ${avgStravaHr !== null ? hrColor(avgStravaHr) : "text-slate-500"}`}
-                >
-                  {avgStravaHr !== null ? `${avgStravaHr} bpm` : "—"}
-                </p>
-                <p className="text-xs text-slate-500 mt-1">avg during activities</p>
-              </div>
-              <div className="bg-gradient-to-br from-orange-900/20 to-slate-800/80 rounded-2xl p-5 shadow-lg border border-orange-700/30">
-                <p className="text-xs text-orange-400 uppercase tracking-wider mb-1">
-                  Strava Calories
-                </p>
-                <p
-                  className={`text-2xl font-bold ${avgStravaCals !== null ? calsColor(avgStravaCals) : "text-slate-500"}`}
-                >
-                  {avgStravaCals !== null ? avgStravaCals.toLocaleString() : "—"}
-                </p>
-                <p className="text-xs text-slate-500 mt-1">avg per active day</p>
-              </div>
+            <div className="bg-gradient-to-br from-slate-800 to-slate-800/80 rounded-2xl p-5 shadow-lg border border-slate-700/50">
+              <p className="text-xs text-slate-400 uppercase tracking-wider mb-1">Avg Steps</p>
+              <p className={`text-2xl font-bold ${avgSteps !== null ? stepsColor(avgSteps) : "text-slate-500"}`}>
+                {avgSteps !== null ? avgSteps.toLocaleString() : "—"}
+              </p>
+              <p className="text-xs text-slate-500 mt-1">per day</p>
             </div>
-          )}
+            <div className="bg-gradient-to-br from-slate-800 to-slate-800/80 rounded-2xl p-5 shadow-lg border border-slate-700/50">
+              <p className="text-xs text-slate-400 uppercase tracking-wider mb-1">Avg Calories</p>
+              <p className={`text-2xl font-bold ${avgCals !== null ? calsColor(avgCals) : "text-slate-500"}`}>
+                {avgCals !== null ? avgCals.toLocaleString() : "—"}
+              </p>
+              <p className="text-xs text-slate-500 mt-1">per day</p>
+            </div>
+            <div className="bg-gradient-to-br from-slate-800 to-slate-800/80 rounded-2xl p-5 shadow-lg border border-slate-700/50">
+              <p className="text-xs text-slate-400 uppercase tracking-wider mb-1">Avg Resting HR</p>
+              <p className={`text-2xl font-bold ${avgHr !== null ? hrColor(avgHr) : "text-slate-500"}`}>
+                {avgHr !== null ? `${avgHr} bpm` : "—"}
+              </p>
+              <p className="text-xs text-slate-500 mt-1">beats per minute</p>
+            </div>
+            <div className="bg-gradient-to-br from-slate-800 to-slate-800/80 rounded-2xl p-5 shadow-lg border border-slate-700/50">
+              <p className="text-xs text-slate-400 uppercase tracking-wider mb-1">Avg Sleep</p>
+              <p className={`text-2xl font-bold ${avgSleep !== null ? sleepColor(avgSleep) : "text-slate-500"}`}>
+                {avgSleep !== null ? formatSleep(avgSleep) : "—"}
+              </p>
+              <p className="text-xs text-slate-500 mt-1">per night</p>
+            </div>
+          </div>
 
           {/* Streak & best day */}
           <div className="flex flex-wrap gap-4">
@@ -589,8 +366,7 @@ export default function DailySummary() {
               <div className="bg-gradient-to-br from-slate-800 to-slate-800/80 rounded-xl px-4 py-3 border border-slate-700/50 flex items-center gap-2">
                 <span className="text-emerald-400 text-lg">&#x1F525;</span>
                 <span className="text-sm text-slate-300">
-                  <span className="font-bold text-white">{streak}-day</span> perfect
-                  streak
+                  <span className="font-bold text-white">{streak}-day</span> perfect streak
                 </span>
               </div>
             )}
@@ -599,9 +375,7 @@ export default function DailySummary() {
                 <span className="text-amber-400 text-lg">&#x2B50;</span>
                 <span className="text-sm text-slate-300">
                   Best day:{" "}
-                  <span className="font-bold text-white">
-                    {formatDateLabel(bestDay.date)}
-                  </span>{" "}
+                  <span className="font-bold text-white">{formatDateLabel(bestDay.date)}</span>{" "}
                   ({bestDay.goalsCompleted}/{GOAL_COUNT})
                 </span>
               </div>
@@ -611,73 +385,25 @@ export default function DailySummary() {
           {/* Sparkline trends */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="bg-gradient-to-br from-slate-800 to-slate-800/80 rounded-2xl p-5 shadow-lg border border-slate-700/50">
-              <p className="text-xs text-slate-400 uppercase tracking-wider mb-2">
-                Goal Completion Trend
-              </p>
+              <p className="text-xs text-slate-400 uppercase tracking-wider mb-2">Goal Completion Trend</p>
               <TrendChart data={goalTrend} color="violet" unit="%" height={100} />
             </div>
-            {hasAnyFitbit && (
-              <>
-                <div className="bg-gradient-to-br from-slate-800 to-slate-800/80 rounded-2xl p-5 shadow-lg border border-slate-700/50">
-                  <p className="text-xs text-slate-400 uppercase tracking-wider mb-2">
-                    Steps Trend
-                  </p>
-                  <TrendChart
-                    data={stepsTrend}
-                    color="emerald"
-                    height={100}
-                  />
-                </div>
-                <div className="bg-gradient-to-br from-slate-800 to-slate-800/80 rounded-2xl p-5 shadow-lg border border-slate-700/50">
-                  <p className="text-xs text-slate-400 uppercase tracking-wider mb-2">
-                    Resting HR Trend
-                  </p>
-                  <TrendChart
-                    data={hrTrend}
-                    color="rose"
-                    unit=" bpm"
-                    height={100}
-                  />
-                </div>
-                <div className="bg-gradient-to-br from-slate-800 to-slate-800/80 rounded-2xl p-5 shadow-lg border border-slate-700/50">
-                  <p className="text-xs text-slate-400 uppercase tracking-wider mb-2">
-                    Sleep Trend
-                  </p>
-                  <TrendChart
-                    data={sleepTrend}
-                    color="blue"
-                    unit="h"
-                    height={100}
-                  />
-                </div>
-              </>
-            )}
-            {hasAnyStrava && (
-              <>
-                <div className="bg-gradient-to-br from-slate-800 to-slate-800/80 rounded-2xl p-5 shadow-lg border border-orange-700/30">
-                  <p className="text-xs text-orange-400 uppercase tracking-wider mb-2">
-                    Strava Distance Trend
-                  </p>
-                  <TrendChart
-                    data={stravaDistTrend}
-                    color="emerald"
-                    unit=" mi"
-                    height={100}
-                  />
-                </div>
-                <div className="bg-gradient-to-br from-slate-800 to-slate-800/80 rounded-2xl p-5 shadow-lg border border-orange-700/30">
-                  <p className="text-xs text-orange-400 uppercase tracking-wider mb-2">
-                    Strava Calories Trend
-                  </p>
-                  <TrendChart
-                    data={stravaCalsTrend}
-                    color="rose"
-                    unit=" cal"
-                    height={100}
-                  />
-                </div>
-              </>
-            )}
+            <div className="bg-gradient-to-br from-slate-800 to-slate-800/80 rounded-2xl p-5 shadow-lg border border-slate-700/50">
+              <p className="text-xs text-slate-400 uppercase tracking-wider mb-2">Steps Trend</p>
+              <TrendChart data={stepsTrend} color="emerald" height={100} />
+            </div>
+            <div className="bg-gradient-to-br from-slate-800 to-slate-800/80 rounded-2xl p-5 shadow-lg border border-slate-700/50">
+              <p className="text-xs text-slate-400 uppercase tracking-wider mb-2">Calories Trend</p>
+              <TrendChart data={calsTrend} color="rose" unit=" cal" height={100} />
+            </div>
+            <div className="bg-gradient-to-br from-slate-800 to-slate-800/80 rounded-2xl p-5 shadow-lg border border-slate-700/50">
+              <p className="text-xs text-slate-400 uppercase tracking-wider mb-2">Resting HR Trend</p>
+              <TrendChart data={hrTrend} color="rose" unit=" bpm" height={100} />
+            </div>
+            <div className="bg-gradient-to-br from-slate-800 to-slate-800/80 rounded-2xl p-5 shadow-lg border border-slate-700/50">
+              <p className="text-xs text-slate-400 uppercase tracking-wider mb-2">Sleep Trend</p>
+              <TrendChart data={sleepTrend} color="blue" unit="h" height={100} />
+            </div>
           </div>
 
           {/* Day-by-day table or monthly averages */}
@@ -687,142 +413,41 @@ export default function DailySummary() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-slate-700/50">
-                      <th className="text-left text-xs text-slate-400 uppercase tracking-wider px-5 py-3">
-                        Month
-                      </th>
-                      <th className="text-center text-xs text-slate-400 uppercase tracking-wider px-4 py-3">
-                        Goals
-                      </th>
-                      {hasAnyFitbit && (
-                        <>
-                          <th className="text-right text-xs text-slate-400 uppercase tracking-wider px-4 py-3">
-                            Avg Steps
-                          </th>
-                          <th className="text-right text-xs text-slate-400 uppercase tracking-wider px-4 py-3">
-                            Avg HR
-                          </th>
-                          <th className="text-right text-xs text-slate-400 uppercase tracking-wider px-4 py-3">
-                            Avg Sleep
-                          </th>
-                        </>
-                      )}
-                      {hasAnyStrava && (
-                        <>
-                          <th className="text-right text-xs text-orange-400 uppercase tracking-wider px-4 py-3">
-                            Distance
-                          </th>
-                          <th className="text-right text-xs text-orange-400 uppercase tracking-wider px-4 py-3">
-                            Workout HR
-                          </th>
-                          <th className="text-right text-xs text-orange-400 uppercase tracking-wider px-4 py-3">
-                            Calories
-                          </th>
-                        </>
-                      )}
+                      <th className="text-left text-xs text-slate-400 uppercase tracking-wider px-5 py-3">Month</th>
+                      <th className="text-center text-xs text-slate-400 uppercase tracking-wider px-4 py-3">Goals</th>
+                      <th className="text-right text-xs text-slate-400 uppercase tracking-wider px-4 py-3">Avg Steps</th>
+                      <th className="text-right text-xs text-slate-400 uppercase tracking-wider px-4 py-3">Avg Cals</th>
+                      <th className="text-right text-xs text-slate-400 uppercase tracking-wider px-4 py-3">Avg HR</th>
+                      <th className="text-right text-xs text-slate-400 uppercase tracking-wider px-5 py-3">Avg Sleep</th>
                     </tr>
                   </thead>
                   <tbody>
                     {monthlyData.map((m) => (
-                      <tr
-                        key={m.month}
-                        className="border-b border-slate-700/30 last:border-0 hover:bg-slate-700/20 transition-colors"
-                      >
-                        <td className="px-5 py-3.5 text-white font-medium">
-                          {formatMonth(m.month)}
-                        </td>
+                      <tr key={m.month} className="border-b border-slate-700/30 last:border-0 hover:bg-slate-700/20 transition-colors">
+                        <td className="px-5 py-3.5 text-white font-medium">{formatMonth(m.month)}</td>
                         <td className="px-4 py-3.5 text-center">
-                          <span
-                            className={`font-semibold ${goalColor(m.avgGoalPct)}`}
-                          >
-                            {m.avgGoalPct}%
+                          <span className={`font-semibold ${goalColor(m.avgGoalPct)}`}>{m.avgGoalPct}%</span>
+                        </td>
+                        <td className="px-4 py-3.5 text-right">
+                          <span className={m.avgSteps !== null ? stepsColor(m.avgSteps) : "text-slate-500"}>
+                            {m.avgSteps !== null ? m.avgSteps.toLocaleString() : "—"}
                           </span>
                         </td>
-                        {hasAnyFitbit && (
-                          <>
-                            <td className="px-4 py-3.5 text-right">
-                              <span
-                                className={
-                                  m.avgSteps !== null
-                                    ? stepsColor(m.avgSteps)
-                                    : "text-slate-500"
-                                }
-                              >
-                                {m.avgSteps !== null
-                                  ? m.avgSteps.toLocaleString()
-                                  : "—"}
-                              </span>
-                            </td>
-                            <td className="px-4 py-3.5 text-right">
-                              <span
-                                className={
-                                  m.avgRestingHr !== null
-                                    ? hrColor(m.avgRestingHr)
-                                    : "text-slate-500"
-                                }
-                              >
-                                {m.avgRestingHr !== null
-                                  ? `${m.avgRestingHr} bpm`
-                                  : "—"}
-                              </span>
-                            </td>
-                            <td className="px-4 py-3.5 text-right">
-                              <span
-                                className={
-                                  m.avgSleepMinutes !== null
-                                    ? sleepColor(m.avgSleepMinutes)
-                                    : "text-slate-500"
-                                }
-                              >
-                                {m.avgSleepMinutes !== null
-                                  ? formatSleep(m.avgSleepMinutes)
-                                  : "—"}
-                              </span>
-                            </td>
-                          </>
-                        )}
-                        {hasAnyStrava && (
-                          <>
-                            <td className="px-4 py-3.5 text-right">
-                              <span
-                                className={
-                                  m.avgStravaDistance !== null
-                                    ? distColor(m.avgStravaDistance)
-                                    : "text-slate-500"
-                                }
-                              >
-                                {m.avgStravaDistance !== null
-                                  ? formatMiles(m.avgStravaDistance)
-                                  : "—"}
-                              </span>
-                            </td>
-                            <td className="px-4 py-3.5 text-right">
-                              <span
-                                className={
-                                  m.avgStravaHr !== null
-                                    ? hrColor(m.avgStravaHr)
-                                    : "text-slate-500"
-                                }
-                              >
-                                {m.avgStravaHr !== null
-                                  ? `${m.avgStravaHr} bpm`
-                                  : "—"}
-                              </span>
-                            </td>
-                            <td className="px-4 py-3.5 text-right">
-                              <span
-                                className={
-                                  m.avgStravaCals !== null
-                                    ? calsColor(m.avgStravaCals)
-                                    : "text-slate-500"
-                                }
-                              >
-                                {m.avgStravaCals !== null
-                                  ? m.avgStravaCals.toLocaleString()
-                                  : "—"}
-                              </span>
-                            </td>
-                          </>
-                        )}
+                        <td className="px-4 py-3.5 text-right">
+                          <span className={m.avgCalories !== null ? calsColor(m.avgCalories) : "text-slate-500"}>
+                            {m.avgCalories !== null ? m.avgCalories.toLocaleString() : "—"}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3.5 text-right">
+                          <span className={m.avgRestingHr !== null ? hrColor(m.avgRestingHr) : "text-slate-500"}>
+                            {m.avgRestingHr !== null ? `${m.avgRestingHr} bpm` : "—"}
+                          </span>
+                        </td>
+                        <td className="px-5 py-3.5 text-right">
+                          <span className={m.avgSleepMinutes !== null ? sleepColor(m.avgSleepMinutes) : "text-slate-500"}>
+                            {m.avgSleepMinutes !== null ? formatSleep(m.avgSleepMinutes) : "—"}
+                          </span>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -835,46 +460,17 @@ export default function DailySummary() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-slate-700/50">
-                      <th className="text-left text-xs text-slate-400 uppercase tracking-wider px-5 py-3">
-                        Date
-                      </th>
-                      <th className="text-center text-xs text-slate-400 uppercase tracking-wider px-4 py-3">
-                        Goals
-                      </th>
-                      {hasAnyFitbit && (
-                        <>
-                          <th className="text-right text-xs text-slate-400 uppercase tracking-wider px-4 py-3">
-                            Steps
-                          </th>
-                          <th className="text-right text-xs text-slate-400 uppercase tracking-wider px-4 py-3">
-                            Resting HR
-                          </th>
-                          <th className="text-right text-xs text-slate-400 uppercase tracking-wider px-4 py-3">
-                            Sleep
-                          </th>
-                        </>
-                      )}
-                      {hasAnyStrava && (
-                        <>
-                          <th className="text-right text-xs text-orange-400 uppercase tracking-wider px-4 py-3">
-                            Distance
-                          </th>
-                          <th className="text-right text-xs text-orange-400 uppercase tracking-wider px-4 py-3">
-                            Workout HR
-                          </th>
-                          <th className="text-right text-xs text-orange-400 uppercase tracking-wider px-4 py-3">
-                            Calories
-                          </th>
-                        </>
-                      )}
+                      <th className="text-left text-xs text-slate-400 uppercase tracking-wider px-5 py-3">Date</th>
+                      <th className="text-center text-xs text-slate-400 uppercase tracking-wider px-4 py-3">Goals</th>
+                      <th className="text-right text-xs text-slate-400 uppercase tracking-wider px-4 py-3">Steps</th>
+                      <th className="text-right text-xs text-slate-400 uppercase tracking-wider px-4 py-3">Calories</th>
+                      <th className="text-right text-xs text-slate-400 uppercase tracking-wider px-4 py-3">Resting HR</th>
+                      <th className="text-right text-xs text-slate-400 uppercase tracking-wider px-5 py-3">Sleep</th>
                     </tr>
                   </thead>
                   <tbody>
                     {dayData.map((d) => (
-                      <tr
-                        key={d.date}
-                        className="border-b border-slate-700/30 last:border-0 hover:bg-slate-700/20 transition-colors"
-                      >
+                      <tr key={d.date} className="border-b border-slate-700/30 last:border-0 hover:bg-slate-700/20 transition-colors">
                         <td className="px-5 py-3.5 text-white font-medium whitespace-nowrap">
                           {formatDateLabel(d.date)}
                         </td>
@@ -885,105 +481,35 @@ export default function DailySummary() {
                                 key={g.routineId}
                                 title={g.name}
                                 className={`w-3 h-3 rounded-full ${
-                                  d.goals[g.routineId]
-                                    ? "bg-emerald-400"
-                                    : "bg-slate-600"
+                                  d.goals[g.routineId] ? "bg-emerald-400" : "bg-slate-600"
                                 }`}
                               />
                             ))}
-                            <span
-                              className={`ml-2 text-xs font-medium ${goalColor((d.goalsCompleted / d.goalCount) * 100)}`}
-                            >
+                            <span className={`ml-2 text-xs font-medium ${goalColor((d.goalsCompleted / d.goalCount) * 100)}`}>
                               {d.goalsCompleted}/{d.goalCount}
                             </span>
                           </div>
                         </td>
-                        {hasAnyFitbit && (
-                          <>
-                            <td className="px-4 py-3.5 text-right">
-                              <span
-                                className={
-                                  d.steps !== null
-                                    ? stepsColor(d.steps)
-                                    : "text-slate-500"
-                                }
-                              >
-                                {d.steps !== null
-                                  ? d.steps.toLocaleString()
-                                  : "—"}
-                              </span>
-                            </td>
-                            <td className="px-4 py-3.5 text-right">
-                              <span
-                                className={
-                                  d.restingHr !== null
-                                    ? hrColor(d.restingHr)
-                                    : "text-slate-500"
-                                }
-                              >
-                                {d.restingHr !== null
-                                  ? `${d.restingHr} bpm`
-                                  : "—"}
-                              </span>
-                            </td>
-                            <td className="px-4 py-3.5 text-right">
-                              <span
-                                className={
-                                  d.sleepMinutes !== null
-                                    ? sleepColor(d.sleepMinutes)
-                                    : "text-slate-500"
-                                }
-                              >
-                                {d.sleepMinutes !== null
-                                  ? formatSleep(d.sleepMinutes)
-                                  : "—"}
-                              </span>
-                            </td>
-                          </>
-                        )}
-                        {hasAnyStrava && (
-                          <>
-                            <td className="px-4 py-3.5 text-right">
-                              <span
-                                className={
-                                  d.strava
-                                    ? distColor(d.strava.distance)
-                                    : "text-slate-500"
-                                }
-                              >
-                                {d.strava
-                                  ? formatMiles(d.strava.distance)
-                                  : "—"}
-                              </span>
-                            </td>
-                            <td className="px-4 py-3.5 text-right">
-                              <span
-                                className={
-                                  d.strava?.avgHr
-                                    ? hrColor(d.strava.avgHr)
-                                    : "text-slate-500"
-                                }
-                              >
-                                {d.strava?.avgHr
-                                  ? `${Math.round(d.strava.avgHr)} bpm`
-                                  : "—"}
-                              </span>
-                            </td>
-                            <td className="px-4 py-3.5 text-right">
-                              <span
-                                className={
-                                  d.strava
-                                    ? calsColor(d.strava.calories)
-                                    : "text-slate-500"
-                                }
-                              >
-                                {d.strava
-                                  ? d.strava.calories.toLocaleString()
-                                  : "—"}
-                              </span>
-                            </td>
-                          </>
-                        )}
+                        <td className="px-4 py-3.5 text-right">
+                          <span className={d.steps !== null ? stepsColor(d.steps) : "text-slate-500"}>
+                            {d.steps !== null ? d.steps.toLocaleString() : "—"}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3.5 text-right">
+                          <span className={d.calories !== null ? calsColor(d.calories) : "text-slate-500"}>
+                            {d.calories !== null ? d.calories.toLocaleString() : "—"}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3.5 text-right">
+                          <span className={d.restingHr !== null ? hrColor(d.restingHr) : "text-slate-500"}>
+                            {d.restingHr !== null ? `${d.restingHr} bpm` : "—"}
+                          </span>
+                        </td>
+                        <td className="px-5 py-3.5 text-right">
+                          <span className={d.sleepMinutes !== null ? sleepColor(d.sleepMinutes) : "text-slate-500"}>
+                            {d.sleepMinutes !== null ? formatSleep(d.sleepMinutes) : "—"}
+                          </span>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
