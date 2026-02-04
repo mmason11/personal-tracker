@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { format, subDays } from "date-fns";
 import { createClient } from "@/lib/supabase/client";
 import { getDailyGoals } from "@/lib/routine";
+import { toggleCompletion } from "@/lib/supabase-streaks";
 import TrendChart from "@/components/metrics/TrendChart";
 
 type SummaryRange = "7days" | "30days" | "monthly";
@@ -192,6 +193,19 @@ export default function DailySummary() {
     else break;
   }
 
+  // Toggle a goal completion for a specific date
+  const handleGoalToggle = async (date: string, routineId: string) => {
+    await toggleCompletion(routineId, date);
+    setDayData((prev) =>
+      prev.map((d) => {
+        if (d.date !== date) return d;
+        const newGoals = { ...d.goals, [routineId]: !d.goals[routineId] };
+        const newCompleted = Object.values(newGoals).filter(Boolean).length;
+        return { ...d, goals: newGoals, goalsCompleted: newCompleted };
+      })
+    );
+  };
+
   // Monthly aggregation
   const monthlyData: MonthData[] = (() => {
     if (range !== "monthly") return [];
@@ -287,7 +301,7 @@ export default function DailySummary() {
   const stepsColor = (steps: number) =>
     steps >= 10000 ? "text-emerald-400" : steps >= 7000 ? "text-amber-400" : "text-red-400";
   const calsColor = (cals: number) =>
-    cals >= 2200 ? "text-emerald-400" : cals >= 1800 ? "text-amber-400" : "text-slate-300";
+    cals >= 3500 ? "text-emerald-400" : cals >= 3000 ? "text-amber-400" : "text-red-400";
   const hrColor = (hr: number) =>
     hr <= 60 ? "text-emerald-400" : hr <= 72 ? "text-blue-400" : "text-amber-400";
   const sleepColor = (mins: number) =>
@@ -382,30 +396,6 @@ export default function DailySummary() {
             )}
           </div>
 
-          {/* Sparkline trends */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="bg-gradient-to-br from-slate-800 to-slate-800/80 rounded-2xl p-5 shadow-lg border border-slate-700/50">
-              <p className="text-xs text-slate-400 uppercase tracking-wider mb-2">Goal Completion Trend</p>
-              <TrendChart data={goalTrend} color="violet" unit="%" height={100} />
-            </div>
-            <div className="bg-gradient-to-br from-slate-800 to-slate-800/80 rounded-2xl p-5 shadow-lg border border-slate-700/50">
-              <p className="text-xs text-slate-400 uppercase tracking-wider mb-2">Steps Trend</p>
-              <TrendChart data={stepsTrend} color="emerald" height={100} />
-            </div>
-            <div className="bg-gradient-to-br from-slate-800 to-slate-800/80 rounded-2xl p-5 shadow-lg border border-slate-700/50">
-              <p className="text-xs text-slate-400 uppercase tracking-wider mb-2">Calories Trend</p>
-              <TrendChart data={calsTrend} color="rose" unit=" cal" height={100} />
-            </div>
-            <div className="bg-gradient-to-br from-slate-800 to-slate-800/80 rounded-2xl p-5 shadow-lg border border-slate-700/50">
-              <p className="text-xs text-slate-400 uppercase tracking-wider mb-2">Resting HR Trend</p>
-              <TrendChart data={hrTrend} color="rose" unit=" bpm" height={100} />
-            </div>
-            <div className="bg-gradient-to-br from-slate-800 to-slate-800/80 rounded-2xl p-5 shadow-lg border border-slate-700/50">
-              <p className="text-xs text-slate-400 uppercase tracking-wider mb-2">Sleep Trend</p>
-              <TrendChart data={sleepTrend} color="blue" unit="h" height={100} />
-            </div>
-          </div>
-
           {/* Day-by-day table or monthly averages */}
           {range === "monthly" ? (
             <div className="bg-gradient-to-br from-slate-800 to-slate-800/80 rounded-2xl shadow-lg border border-slate-700/50 overflow-hidden">
@@ -477,11 +467,14 @@ export default function DailySummary() {
                         <td className="px-4 py-3.5">
                           <div className="flex items-center justify-center gap-1.5">
                             {dailyGoals.map((g) => (
-                              <div
+                              <button
                                 key={g.routineId}
                                 title={g.name}
-                                className={`w-3 h-3 rounded-full ${
-                                  d.goals[g.routineId] ? "bg-emerald-400" : "bg-slate-600"
+                                onClick={() => handleGoalToggle(d.date, g.routineId)}
+                                className={`w-3.5 h-3.5 rounded-full transition-colors cursor-pointer hover:ring-2 hover:ring-offset-1 hover:ring-offset-slate-800 ${
+                                  d.goals[g.routineId]
+                                    ? "bg-emerald-400 hover:ring-emerald-400/50"
+                                    : "bg-slate-600 hover:ring-slate-400/50"
                                 }`}
                               />
                             ))}
@@ -517,6 +510,30 @@ export default function DailySummary() {
               </div>
             </div>
           )}
+
+          {/* Sparkline trends */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="bg-gradient-to-br from-slate-800 to-slate-800/80 rounded-2xl p-5 shadow-lg border border-slate-700/50">
+              <p className="text-xs text-slate-400 uppercase tracking-wider mb-2">Goal Completion Trend</p>
+              <TrendChart data={goalTrend} color="violet" unit="%" height={100} />
+            </div>
+            <div className="bg-gradient-to-br from-slate-800 to-slate-800/80 rounded-2xl p-5 shadow-lg border border-slate-700/50">
+              <p className="text-xs text-slate-400 uppercase tracking-wider mb-2">Steps Trend</p>
+              <TrendChart data={stepsTrend} color="emerald" height={100} />
+            </div>
+            <div className="bg-gradient-to-br from-slate-800 to-slate-800/80 rounded-2xl p-5 shadow-lg border border-slate-700/50">
+              <p className="text-xs text-slate-400 uppercase tracking-wider mb-2">Calories Trend</p>
+              <TrendChart data={calsTrend} color="rose" unit=" cal" height={100} />
+            </div>
+            <div className="bg-gradient-to-br from-slate-800 to-slate-800/80 rounded-2xl p-5 shadow-lg border border-slate-700/50">
+              <p className="text-xs text-slate-400 uppercase tracking-wider mb-2">Resting HR Trend</p>
+              <TrendChart data={hrTrend} color="rose" unit=" bpm" height={100} />
+            </div>
+            <div className="bg-gradient-to-br from-slate-800 to-slate-800/80 rounded-2xl p-5 shadow-lg border border-slate-700/50">
+              <p className="text-xs text-slate-400 uppercase tracking-wider mb-2">Sleep Trend</p>
+              <TrendChart data={sleepTrend} color="blue" unit="h" height={100} />
+            </div>
+          </div>
         </>
       )}
     </div>

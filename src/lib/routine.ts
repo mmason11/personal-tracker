@@ -142,5 +142,6 @@ export function getDailyGoals(): DailyGoal[] {
     { id: "goal-morning-workout", name: "Morning workout", routineId: "morning-workout" },
     { id: "goal-afternoon-workout", name: "Afternoon workout", routineId: "workout" },
     { id: "goal-reading", name: "Nightly reading", routineId: "reading" },
+    { id: "goal-asleep-timely", name: "Asleep timely", routineId: "lights-off" },
   ];
 }
