@@ -11,8 +11,10 @@ import GoogleCalendar from "@/components/GoogleCalendar";
 import DayTimeline from "@/components/DayTimeline";
 import TodoSummary from "@/components/TodoSummary";
 import MetricsPage from "@/components/MetricsPage";
+import MorningReview from "@/components/MorningReview";
+import DailySummary from "@/components/DailySummary";
 
-type Tab = "dashboard" | "sports" | "todos" | "calendar" | "metrics";
+type Tab = "dashboard" | "sports" | "todos" | "calendar" | "metrics" | "summary";
 
 export default function Home() {
   const [activeTab, setActiveTab] = useState<Tab>("dashboard");
@@ -25,6 +27,7 @@ export default function Home() {
     { id: "todos", label: "Tasks", icon: "M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" },
     { id: "calendar", label: "Calendar", icon: "M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" },
     { id: "metrics", label: "Metrics", icon: "M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" },
+    { id: "summary", label: "Summary", icon: "M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" },
   ];
 
   if (loading) {
@@ -87,6 +90,7 @@ export default function Home() {
       <main className="max-w-5xl mx-auto px-4 py-6 relative z-10">
         {activeTab === "dashboard" && (
           <div className="space-y-6">
+            <MorningReview />
             <DayTimeline />
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               <RoutineTracker />
@@ -105,6 +109,8 @@ export default function Home() {
         {activeTab === "calendar" && <GoogleCalendar />}
 
         {activeTab === "metrics" && <MetricsPage />}
+
+        {activeTab === "summary" && <DailySummary />}
       </main>
 
       {/* Mobile bottom nav */}
